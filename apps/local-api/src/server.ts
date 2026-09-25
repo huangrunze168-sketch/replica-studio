@@ -117,6 +117,7 @@ export function buildServer(service: ProjectService, kernel?: KernelBinding, opt
   );
 
   app.get('/health', async () => ({ status: 'ok', service: 'qiyin-local-api', protocol: '@1' }));
+  app.get('/', async (_request, reply) => reply.redirect('http://127.0.0.1:5173/'));
   function stripeHeaders(secretKey: string): Record<string, string> {
     return { authorization: `Bearer ${secretKey}`, 'content-type': 'application/x-www-form-urlencoded' };
   }

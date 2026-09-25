@@ -20,6 +20,9 @@ function setup() {
 describe('本地 API·账号额度与支付确认', () => {
   it('额度消耗必须确认，并持久化到账号账本', async () => {
     const { root, app } = setup();
+    const rootResponse = await app.inject({ method: 'GET', url: '/' });
+    expect(rootResponse.statusCode).toBe(302);
+    expect(rootResponse.headers.location).toBe('http://127.0.0.1:5173/');
     const initial = await app.inject({ method: 'GET', url: '/api/v1/account' });
     expect(initial.statusCode).toBe(200);
     expect(initial.json()).toMatchObject({ plan: 'free', quota_credits: 3, watermark: true });
