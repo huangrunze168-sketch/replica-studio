@@ -458,6 +458,7 @@ export class ProjectService {
       case 'project.restore': return this.restoreProject(command);
       case 'project.purge': return this.purgeProject(command);
       case 'project.rename': return this.renameProject(command);
+      case 'project.duplicate': return this.duplicateProject(command);
       case 'folder.create': return this.createFolder(command);
       case 'folder.delete': return this.deleteFolder(command);
       case 'folder.rename': return this.renameFolder(command);
@@ -648,6 +649,133 @@ export class ProjectService {
       .run(name, revision, timestamp, project.id);
     this.event(project.id, revision, 'project.renamed', command, { from: project.name, to: name });
     return this.envelope(command, project.id, revision, { name });
+  }
+
+  /**
+   * 复制项目：复制项目事实、分镜、素材引用、主体关联、候选、修复与生成历史。
+   *
+   * 产物是内容寻址的全局资源，因此不复制文件本身，而是为副本创建一条新的
+   * artifact 记录，并在 metadata 中保留 project_copies，后续接入文件复制时
+   * 可以按同一套路径规则补上磁盘副本。
+   */
+  private duplicateProject(command: Extract<DomainCommand, { type: 'project.duplicate' }>): ResultEnvelope {
+    const source = this.projectForWrite(command.project_id, command.expected_revision);
+    const id = randomUUID();
+    const timestamp = now();
+    const baseName = command.payload.name?.trim() || `${source.name} · 副本`;
+    this.db.prepare(
+      `INSERT INTO projects(id, name, revision, state, max_budget_cents, reserved_budget_cents, rights_confirmed, folder_id, deleted_at, created_at, updated_at,
+        film_playback, film_transition, film_transition_direction)
+       VALUES (?, ?, 1, ?, ?, 0, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      baseName,
+      source.state,
+      source.max_budget_cents,
+      source.rights_confirmed,
+      timestamp,
+      timestamp,
+      source.film_playback,
+      source.film_transition,
+      source.film_transition_direction,
+    );
+
+    const artifactMap = new Map<string, string>();
+    const artifactRows = this.db
+      .prepare('SELECT artifact_id, media_type, bytes, metadata_json, status, created_at FROM artifacts WHERE metadata_json IS NOT NULL')
+      .all() as unknown as Array<{ artifact_id: string; media_type: string; bytes: number; metadata_json: string | null; status: string; created_at: string }>;
+    for (const row of artifactRows) {
+      if (row.metadata_json === null) continue;
+      let metadata: Record<string, unknown>;
+      try {
+        metadata = JSON.parse(row.metadata_json) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const owner = metadata.project_id;
+      const copies = metadata.project_copies;
+      const copiesRecord = copies !== null && typeof copies === 'object' && !Array.isArray(copies) ? copies as Record<string, unknown> : {};
+      const ownedBySource = owner === source.id || typeof copiesRecord[source.id] === 'string';
+      if (!ownedBySource) continue;
+      const newArtifactId = `sha256:${createHash('sha256').update(`${row.artifact_id}:${id}`).digest('hex')}`;
+      const relativePath = typeof metadata.artifact_path_relative === 'string'
+        ? metadata.artifact_path_relative
+        : typeof metadata.frame_path_relative === 'string'
+          ? metadata.frame_path_relative
+          : null;
+      const nextMetadata: Record<string, unknown> = {
+        ...metadata,
+        project_id: id,
+        project_copies: {
+          ...copiesRecord,
+          [id]: relativePath ?? (typeof copiesRecord[source.id] === 'string' ? copiesRecord[source.id] : ''),
+        },
+      };
+      this.db.prepare(
+        'INSERT INTO artifacts(artifact_id, media_type, bytes, metadata_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(newArtifactId, row.media_type, row.bytes, json(nextMetadata), row.status, row.created_at);
+      artifactMap.set(row.artifact_id, newArtifactId);
+    }
+
+    const regenerate = new Set([
+      'decision_id', 'bundle_id', 'intent_id', 'task_id', 'asset_id', 'report_id', 'plan_id',
+    ]);
+    const projectTables = [
+      'shot_fields',
+      'gate_decisions',
+      'prompt_bundles',
+      'image_candidates',
+      'selections',
+      'video_intents',
+      'asset_generation_intents',
+      'spatial_plans',
+      'kernel_tasks',
+      'source_assets',
+      'eval_reports',
+      'repair_plans',
+      'image_generation_intents',
+      'video_generation_intents',
+      'asset_ratings',
+      'shot_playback',
+    ];
+    let copiedRows = 0;
+    for (const table of projectTables) {
+      const tableColumns = (this.db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name: string }>)
+        .map(column => column.name)
+        .filter(column => !(table === 'gate_decisions' && column === 'sequence'));
+      const rows = this.db.prepare(`SELECT * FROM ${table} WHERE project_id=?`).all(source.id) as unknown as Array<Record<string, unknown>>;
+      if (rows.length === 0) continue;
+      const insertColumns = tableColumns.filter(column => column !== 'sequence');
+      const placeholders = insertColumns.map(() => '?').join(', ');
+      const insert = this.db.prepare(`INSERT INTO ${table}(${insertColumns.join(', ')}) VALUES (${placeholders})`);
+      for (const row of rows) {
+        const values = insertColumns.map((column) => {
+          if (column === 'project_id') return id;
+          if (regenerate.has(column)) return randomUUID();
+          if (['reference_artifact', 'result_artifact', 'clip_artifact_id', 'artifact_id'].includes(column)) {
+            const value = row[column];
+            return typeof value === 'string' ? artifactMap.get(value) ?? value : value;
+          }
+          return row[column];
+        });
+        insert.run(...(values as never[]));
+        copiedRows += 1;
+      }
+    }
+
+    this.event(id, 1, 'project.duplicated', command, {
+      source_project_id: source.id,
+      name: baseName,
+      copied_rows: copiedRows,
+      copied_artifacts: artifactMap.size,
+    });
+    return this.envelope(command, id, 1, {
+      project_id: id,
+      source_project_id: source.id,
+      name: baseName,
+      copied_rows: copiedRows,
+      copied_artifacts: artifactMap.size,
+    });
   }
 
   /**

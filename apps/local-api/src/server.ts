@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, extname, isAbsolute, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import sensible from '@fastify/sensible';
@@ -40,6 +40,76 @@ export function buildServer(service: ProjectService, kernel?: KernelBinding, opt
   const activeRuns = new Map<string, { sessionKey: string; handle: AgentRunHandle }>();
   const completedRuns = new Set<string>();
   const messageRuns = new Map<string, string>();
+  interface AccountTransaction {
+    id: string;
+    kind: 'free-grant' | 'consumed' | 'subscription-confirmed';
+    credits: number;
+    amount_cents: number;
+    reason: string;
+    created_at: string;
+  }
+
+  interface AccountState {
+    account_id: string;
+    plan: 'free' | 'studio' | 'pro';
+    quota_credits: number;
+    watermark: boolean;
+    subscription_expires_at: string | null;
+    transactions: AccountTransaction[];
+  }
+
+  const accountFile = resolve(workspaceRoot ?? process.cwd(), '.qiyin', 'account.json');
+
+  function loadAccount(): AccountState {
+    const fallback: AccountState = {
+      account_id: 'local-account',
+      plan: 'free',
+      quota_credits: 3,
+      watermark: true,
+      subscription_expires_at: null,
+      transactions: [],
+    };
+    if (!existsSync(accountFile)) return fallback;
+    try {
+      const parsed = JSON.parse(readFileSync(accountFile, 'utf8')) as Partial<AccountState>;
+      if (typeof parsed.account_id !== 'string' || !Array.isArray(parsed.transactions)) return fallback;
+      return {
+        account_id: parsed.account_id,
+        plan: parsed.plan === 'studio' || parsed.plan === 'pro' ? parsed.plan : 'free',
+        quota_credits: Number.isFinite(parsed.quota_credits) ? Math.max(0, Number(parsed.quota_credits)) : fallback.quota_credits,
+        watermark: parsed.plan !== undefined ? parsed.plan !== 'free' : fallback.watermark,
+        subscription_expires_at: typeof parsed.subscription_expires_at === 'string' ? parsed.subscription_expires_at : null,
+        transactions: parsed.transactions,
+      };
+    } catch {
+      return fallback;
+    }
+  }
+
+  function saveAccount(account: AccountState): AccountState {
+    mkdirSync(dirname(accountFile), { recursive: true });
+    const temp = `${accountFile}.${randomUUID()}.part`;
+    writeFileSync(temp, JSON.stringify(account, null, 2), 'utf8');
+    renameSync(temp, accountFile);
+    return account;
+  }
+
+  function consumeCredits(state: AccountState, credits: number, reason: string): AccountState {
+    const next = Math.max(0, state.quota_credits - credits);
+    return saveAccount({
+      ...state,
+      quota_credits: next,
+      transactions: [{
+        id: randomUUID(),
+        kind: 'consumed' as const,
+        credits,
+        amount_cents: 0,
+        reason,
+        created_at: new Date().toISOString(),
+      }, ...state.transactions].slice(0, 100),
+    });
+  }
+
   app.addContentTypeParser(
     /^(?:application\/octet-stream|image\/[^;]+|video\/[^;]+|audio\/[^;]+)(?:;.*)?$/i,
     { parseAs: 'buffer' },
@@ -47,6 +117,59 @@ export function buildServer(service: ProjectService, kernel?: KernelBinding, opt
   );
 
   app.get('/health', async () => ({ status: 'ok', service: 'qiyin-local-api', protocol: '@1' }));
+  app.get('/api/v1/account', async () => {
+    const account = loadAccount();
+    return {
+      ...account,
+      entitlements: {
+        max_duration_seconds: 15,
+        preview_quality: account.plan === 'free' ? '低清预览' : '高清导出',
+        watermark: account.watermark,
+        local_retakes: account.plan === 'free' ? 1 : 999,
+        requires_payment_confirmation: true,
+      },
+    };
+  });
+
+  app.post<{ Body: { credits?: number; reason?: string; confirmation?: boolean } }>('/api/v1/account/consume', async (request, reply) => {
+    const credits = Number(request.body?.credits ?? 0);
+    const reason = request.body?.reason;
+    if (!Number.isInteger(credits) || credits < 1 || !reason?.trim() || request.body?.confirmation !== true) {
+      return reply.code(422).send({ error: { code: 'ACCOUNT_CONFIRMATION_REQUIRED', message: '额度消耗前必须确认 credits、reason 与 confirmation' } });
+    }
+    const account = loadAccount();
+    if (account.quota_credits < credits) {
+      return reply.code(402).send({ error: { code: 'INSUFFICIENT_QUOTA', message: '生成额度不足，请订阅或购买额度' } });
+    }
+    return consumeCredits(account, credits, reason.trim());
+  });
+
+  app.post<{ Body: { plan?: string; amount_cents?: number; confirmation?: boolean } }>('/api/v1/account/payment/confirm', async (request, reply) => {
+    const plan = request.body?.plan;
+    const amountCents = Number(request.body?.amount_cents ?? 0);
+    if ((plan !== 'studio' && plan !== 'pro') || !Number.isInteger(amountCents) || amountCents < 0 || request.body?.confirmation !== true) {
+      return reply.code(422).send({ error: { code: 'PAYMENT_CONFIRMATION_REQUIRED', message: '支付前必须确认方案、金额与 confirmation' } });
+    }
+    const current = loadAccount();
+    const credits = plan === 'pro' ? 100 : 30;
+    const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    return saveAccount({
+      ...current,
+      plan,
+      quota_credits: current.quota_credits + credits,
+      watermark: false,
+      subscription_expires_at: expires,
+      transactions: [{
+        id: randomUUID(),
+        kind: 'subscription-confirmed' as const,
+        credits,
+        amount_cents: amountCents,
+        reason: `${plan} 订阅支付确认`,
+        created_at: new Date().toISOString(),
+      }, ...current.transactions].slice(0, 100),
+    });
+  });
+
   app.post('/api/v1/commands', async (request, reply) => {
     try {
       return service.execute(request.body);

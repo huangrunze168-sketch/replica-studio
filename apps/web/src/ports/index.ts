@@ -47,5 +47,7 @@ export interface SourcePort {
   create(projectId: string, name: string, genre: string): Promise<ReferenceSource>;
 }
 export interface GenerationPort { listJobs(projectId: string): Promise<GenerationJob[]>; create(projectId: string, title: string, type: string): Promise<GenerationJob>; }
+export interface AccountEntitlements { accountId: string; plan: 'free' | 'studio' | 'pro'; quotaCredits: number; watermark: boolean; subscriptionExpiresAt: string | null; entitlements: { max_duration_seconds: number; preview_quality: string; watermark: boolean; local_retakes: number; requires_payment_confirmation: boolean }; }
+export interface AccountPort { get(): Promise<AccountEntitlements>; consume(credits: number, reason: string): Promise<AccountEntitlements>; confirmPayment(plan: 'studio' | 'pro', amountCents: number): Promise<AccountEntitlements>; }
 export interface AgentPort { listMessages(projectId: string): Promise<AgentMessage[]>; send(projectId: string, content: string): Promise<AgentMessage>; }
-export interface AppPorts { projects: ProjectPort; shots: ShotPort; media: MediaPort; source: SourcePort; generation: GenerationPort; agent: AgentPort; }
+export interface AppPorts { account: AccountPort; projects: ProjectPort; shots: ShotPort; media: MediaPort; source: SourcePort; generation: GenerationPort; agent: AgentPort; }

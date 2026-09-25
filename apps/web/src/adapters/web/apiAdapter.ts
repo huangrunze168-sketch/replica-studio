@@ -1,4 +1,5 @@
 import type {
+  AccountEntitlements,
   AgentMessage,
   AppPorts,
   Asset,
@@ -8,8 +9,13 @@ import type {
   ProjectSummary,
   ReferenceSource,
   Shot,
-} from '../../ports';
-import { memoryAdapter } from './memoryAdapter';
+} from '../../ports/index.js';
+import { memoryAdapter } from './memoryAdapter.js';
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 const API_BASE = '/api/v1';
 
@@ -159,6 +165,24 @@ function mapJob(row: Record<string, unknown>, kind: 'image' | 'video'): Generati
   };
 }
 
+function mapAccount(raw: Record<string, unknown>): AccountEntitlements {
+  const entitlements = (raw.entitlements ?? {}) as Record<string, unknown>;
+  return {
+    accountId: String(raw.account_id ?? 'local-account'),
+    plan: raw.plan === 'studio' || raw.plan === 'pro' ? raw.plan : 'free',
+    quotaCredits: Number(raw.quota_credits ?? 0),
+    watermark: Boolean(raw.watermark),
+    subscriptionExpiresAt: typeof raw.subscription_expires_at === 'string' ? raw.subscription_expires_at : null,
+    entitlements: {
+      max_duration_seconds: Number(entitlements.max_duration_seconds ?? 15),
+      preview_quality: String(entitlements.preview_quality ?? '低清预览'),
+      watermark: Boolean(entitlements.watermark),
+      local_retakes: Number(entitlements.local_retakes ?? 1),
+      requires_payment_confirmation: Boolean(entitlements.requires_payment_confirmation ?? true),
+    },
+  };
+}
+
 async function ensureAgentSession(projectId: string): Promise<{ id: string; session_revision: number; messages: Array<Record<string, unknown>> }> {
   const sessions = await apiFetch<Array<{ id: string }>>(`/agent/sessions?project_id=${encodeURIComponent(projectId)}`);
   const sessionId = sessions[0]?.id;
@@ -203,8 +227,9 @@ export function createApiAdapter(fallbackAdapter: AppPorts = memoryAdapter): App
     })(), () => fallbackAdapter.projects.purge(id, confirmName)),
     duplicate: id => fallback((async () => {
       const source = await getDetail(id);
-      const created = await projects.create({ name: `${source.name} · 副本`, description: '项目副本' });
-      return created;
+      const result = await sendCommand('project.duplicate', { name: `${source.name} · 副本` }, id, source.revision);
+      const detail = await getDetail(result.project_id);
+      return projectSummary(detail, detail);
     })(), () => fallbackAdapter.projects.duplicate(id)),
     updateSettings: (id, settings: ProjectSettings) => fallback((async () => {
       const detail = await getDetail(id);
@@ -215,6 +240,11 @@ export function createApiAdapter(fallbackAdapter: AppPorts = memoryAdapter): App
   };
 
   return {
+    account: {
+      get: () => apiFetch<Record<string, unknown>>('/account').then(mapAccount),
+      consume: (credits, reason) => apiFetch<Record<string, unknown>>('/account/consume', { method: 'POST', body: JSON.stringify({ credits, reason, confirmation: true }) }).then(mapAccount),
+      confirmPayment: (plan, amountCents) => apiFetch<Record<string, unknown>>('/account/payment/confirm', { method: 'POST', body: JSON.stringify({ plan, amount_cents: amountCents, confirmation: true }) }).then(mapAccount),
+    },
     projects,
     shots: {
       list: projectId => fallback(getDetail(projectId).then(detail => (detail.shot_fields?.shots ?? []).map(mapShot)), () => fallbackAdapter.shots.list(projectId)),
@@ -224,14 +254,41 @@ export function createApiAdapter(fallbackAdapter: AppPorts = memoryAdapter): App
     },
     source: {
       list: projectId => fallback(getDetail(projectId).then(detail => (detail.sources ?? []).map(mapSource)), () => fallbackAdapter.source.list(projectId)),
-      create: (...args) => fallbackAdapter.source.create(...args),
+      create: async (projectId, name, genre) => {
+        const detail = await getDetail(projectId);
+        const hash = await sha256Hex(`${projectId}:${name}:${genre}`);
+        const relativePath = `references/${encodeURIComponent(name).slice(0, 80) || 'reference'}-${hash.slice(0, 12)}.mp4`;
+        await sendCommand('source.register', {
+          relative_path: relativePath,
+          content_hash: `sha256:${hash}`,
+          bytes: 1024,
+          media_type: 'video/mp4',
+        }, projectId, detail.revision);
+        const updated = await getDetail(projectId);
+        const source = (updated.sources ?? []).map(mapSource).find(item => item.name === relativePath);
+        if (source) return source;
+        return mapSource({ asset_id: uuid(), relative_path: relativePath, bytes: 1024, media_type: 'video/mp4' });
+      },
     },
     generation: {
       listJobs: projectId => fallback(getDetail(projectId).then(detail => [
         ...(detail.image_generations ?? []).map(row => mapJob(row, 'image')),
         ...(detail.video_generations ?? []).map(row => mapJob(row, 'video')),
       ]), () => fallbackAdapter.generation.listJobs(projectId)),
-      create: (...args) => fallbackAdapter.generation.create(...args),
+      create: async (projectId, title, type) => {
+        const detail = await getDetail(projectId);
+        const shotId = String(detail.shot_fields?.shots?.[0]?.shot_id ?? '');
+        if (!shotId) throw new Error('当前项目还没有分镜，无法创建生成任务。');
+        const isVideo = type.includes('视频') || type.toLowerCase().includes('video');
+        await sendCommand(isVideo ? 'video-generation.request' : 'image-generation.request', isVideo
+          ? { shot_id: shotId, model: 'local-demo', prompt: title, duration_seconds: 15, estimated_cost_cents: 0 }
+          : { shot_id: shotId, model: 'local-demo', prompt: title, estimated_cost_cents: 0 }, projectId, detail.revision);
+        const updated = await getDetail(projectId);
+        const rows = isVideo ? (updated.video_generations ?? []) : (updated.image_generations ?? []);
+        const row = rows.find(item => String(item.prompt ?? '') === title) ?? rows[0];
+        if (!row) throw new Error('生成任务已提交，但没有返回任务记录。');
+        return mapJob(row, isVideo ? 'video' : 'image');
+      },
     },
     agent: {
       listMessages: projectId => fallback(ensureAgentSession(projectId).then(session => (session.messages ?? []).map(message => ({
@@ -259,6 +316,5 @@ export function createApiAdapter(fallbackAdapter: AppPorts = memoryAdapter): App
 }
 
 export const apiAdapter = createApiAdapter();
-
 
 

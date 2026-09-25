@@ -1,4 +1,4 @@
-import type { AppPorts, AgentMessage, Asset, GenerationJob, ProjectPort, ProjectSummary, ReferenceSource, Shot, SourceFinding } from '../../ports/index.js';
+import type { AccountEntitlements, AppPorts, AgentMessage, Asset, GenerationJob, ProjectPort, ProjectSummary, ReferenceSource, Shot, SourceFinding } from '../../ports/index.js';
 
 const projects: ProjectSummary[] = [
   { id: 'p-demo', name: '雨夜追踪 · Demo', description: '一支 60 秒城市悬疑短片', updatedAt: '刚刚', status: 'active', shots: 12, assets: 28, progress: 68, revision: 4, state: 'PRODUCTION', maxBudgetCents: 2000, rightsConfirmed: true },
@@ -76,9 +76,15 @@ const sources: ReferenceSource[] = [
      不用「待生成」这类假文案占位。 */
   { id: 'r3', name: '氛围音乐 · 48 秒', kind: 'audio', meta: '00:48 · WAV · 48kHz', genre: '系列内容', status: 'analyzing', accent: '#53439a', rhythm: [], findings: [] },
 ];
+let accountState: AccountEntitlements = { accountId: 'demo-account', plan: 'free', quotaCredits: 3, watermark: true, subscriptionExpiresAt: null, entitlements: { max_duration_seconds: 15, preview_quality: '低清预览', watermark: true, local_retakes: 1, requires_payment_confirmation: true } };
 const messages: AgentMessage[] = [{ id: 'm1', role: 'agent', content: '你好，我是项目 Agent。可以帮你检查镜头连续性、整理素材，或发起生成任务。', createdAt: '刚刚' }];
 const delay = <T,>(value: T) => new Promise<T>(resolve => setTimeout(() => resolve(value), 100));
 export const memoryAdapter: AppPorts = {
+  account: {
+    get: () => delay(accountState),
+    consume: (credits, reason) => { accountState = { ...accountState, quotaCredits: Math.max(0, accountState.quotaCredits - credits) }; return delay(accountState); },
+    confirmPayment: (plan) => { accountState = { ...accountState, plan, quotaCredits: accountState.quotaCredits + (plan === 'pro' ? 100 : 30), watermark: false, subscriptionExpiresAt: new Date(Date.now() + 30 * 86400000).toISOString() }; return delay(accountState); },
+  },
   projects: {
     list: () => delay(projects.filter(project => project.status === 'active')),
     listArchived: () => delay(projects.filter(project => project.status === 'archived')),

@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { ports } from '../../app/useAppData';
 import { navigate } from '../../app/router';
+import type { AccountEntitlements } from '../../ports';
 import { canUseFreeRetake, evaluateFreeExport, freePlan } from '../../domain/entitlements';
 
 const steps: Array<[string, string, string]> = [
@@ -36,6 +38,12 @@ export function CreateFlow() {
   const [ratio, setRatio] = useState('9:16');
   const [quality, setQuality] = useState('低清预览');
   const [exportState, setExportState] = useState<ExportState>('idle');
+  const [account, setAccount] = useState<AccountEntitlements>();
+
+
+  useEffect(() => {
+    void ports.account.get().then(setAccount).catch(() => undefined);
+  }, []);
 
   const pipelineState = (index: number): 'done' | 'active' | 'pending' => {
     if (index < activeStep) return 'done';
@@ -43,12 +51,28 @@ export function CreateFlow() {
     return 'pending';
   };
 
-  const confirmBatchRetake = () => {
+  const consumeCredit = async (reason: string): Promise<boolean> => {
+    if (!account || account.quotaCredits < 1) {
+      setShotNotice('生成额度不足，请先完成订阅或额度支付确认。');
+      return false;
+    }
+    try {
+      const next = await ports.account.consume(1, reason);
+      setAccount(next);
+      return true;
+    } catch {
+      setShotNotice('额度服务不可用，未执行生成动作。');
+      return false;
+    }
+  };
+
+  const confirmBatchRetake = async () => {
     setPendingBatchRetake(false);
     if (!canUseFreeRetake(freeRetakesRemaining)) {
       setShotNotice('免费体验的 1 次局部重做已使用；继续批量重做需要付费或订阅确认。');
       return;
     }
+    if (!(await consumeCredit('batch-local-retake'))) return;
     setFreeRetakesRemaining(value => Math.max(0, value - 1));
     regenerateUnlocked();
   };
@@ -66,7 +90,7 @@ export function CreateFlow() {
     }, 900);
   };
 
-  const confirmShotAction = () => {
+  const confirmShotAction = async () => {
     if (!pendingShot) return;
     if (pendingShot.kind === 'retake' && !canUseFreeRetake(freeRetakesRemaining)) {
       setPendingShot(null);
@@ -74,10 +98,13 @@ export function CreateFlow() {
       return;
     }
     const action = pendingShot;
+    if (action.kind === 'retake' && !(await consumeCredit(`local-retake:shot-${action.index + 1}`))) {
+      setPendingShot(null);
+      return;
+    }
     setPendingShot(null);
     if (action.kind === 'restore') {
       setShotVersions(current => current.map((version, index) => index === action.index ? Math.max(1, version - 1) : version));
-      setFreeRetakesRemaining(value => Math.max(0, value - 1));
       setShotNotice(`镜头 ${action.index + 1} 已恢复到上一版，当前预览被替换。`);
       return;
     }
@@ -85,11 +112,23 @@ export function CreateFlow() {
     window.setTimeout(() => {
       setShotVersions(current => current.map((version, index) => index === action.index ? version + 1 : version));
       setRetaking(null);
+      setFreeRetakesRemaining(value => Math.max(0, value - 1));
       setShotNotice(`镜头 ${action.index + 1} 已生成新版本；旧版本仍可恢复。`);
     }, 900);
   };
 
-  const startExport = () => {
+  const startExport = async () => {
+    const decision = evaluateFreeExport(15, quality);
+    if (decision.requiresPaymentConfirmation && account && account.plan === 'free') {
+      try {
+        const upgraded = await ports.account.confirmPayment('studio', 9900);
+        setAccount(upgraded);
+      } catch {
+        setShotNotice('支付确认服务不可用，导出已取消。');
+        setExportState('idle');
+        return;
+      }
+    }
     setExportState('exporting');
     window.setTimeout(() => setExportState('done'), 1100);
   };
@@ -107,6 +146,11 @@ export function CreateFlow() {
           <p className="overline">STEP {String(activeStep + 1).padStart(2, '0')} / 04 · FROM REFERENCE TO YOURS</p>
           <h1>{['先上传参考，', '把风格与主体，', '逐镜确认，', '精修完成，'][activeStep]}<em>{['让方法看得见。', '变成可控参数。', '只重做不满意的。', '带着项目继续。'][activeStep]}</em></h1>
           <p className="create-lede">小QTV 提取镜头语言与制作方法，不复制参考作品的具体内容。请确保你拥有上传素材的使用权。</p>
+          <div className="account-status" aria-live="polite">
+            <span>账号方案：{account?.plan === 'free' ? '免费体验' : account?.plan === 'studio' ? 'Studio' : 'Pro'}</span>
+            <span>剩余生成额度：{account?.quotaCredits ?? '...'}</span>
+            <span>{account?.watermark ? '导出带小QTV水印' : '已去除水印'}</span>
+          </div>
         </div>
 
         <ol className="create-rail" aria-label="创作四步">
