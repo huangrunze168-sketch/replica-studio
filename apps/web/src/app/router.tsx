@@ -14,6 +14,7 @@ import { useSyncExternalStore } from 'react';
 
 export type Route =
   | { name: 'landing' }
+  | { name: 'signup' }
   | { name: 'create' }
   | { name: 'workbench'; projectId: string };
 
@@ -51,6 +52,8 @@ export function matchRoute(pathname: string): Route {
 
   if (segments.length === 0) {
     next = { name: 'landing' };
+  } else if (segments[0] === 'signup') {
+    next = { name: 'signup' };
   } else if (segments[0] === 'create') {
     next = { name: 'create' };
   } else if (segments[0] === 'workbench') {
@@ -101,7 +104,7 @@ export function navigate(to: string, options: { replace?: boolean } = {}) {
 }
 
 /** 本应用真正拥有的路径前缀。不在其中的链接交给浏览器正常处理。 */
-const INTERNAL_ROOTS = new Set(['', 'create', 'workbench']);
+const INTERNAL_ROOTS = new Set(['', 'signup', 'create', 'workbench']);
 
 export type LinkDecision =
   /** 站内路由跳转 */

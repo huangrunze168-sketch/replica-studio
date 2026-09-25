@@ -40,12 +40,13 @@ function SplitText({ text, accent = false }: { text: string; accent?: boolean })
 export function LandingPage() {
   const [activeTag, setActiveTag] = useState('知识类口播');
   const [openFaq, setOpenFaq] = useState<number | null>(0);
+  const [demoOpen, setDemoOpen] = useState(false);
   const tags = ['知识类口播', '产品广告', '情绪化剧情片', '系列内容'];
   return <div className="marketing-page">
     <header className="marketing-nav">
       <a className="marketing-brand" href="/" aria-label="小QTV 首页"><span className="brand-symbol">Q</span><span>小QTV</span></a>
       <nav className="marketing-links" aria-label="主导航"><a href="#method">方法</a><a href="#workflow">流程</a><a href="#evidence">凭什么信</a></nav>
-      <a className="nav-cta" href="/create">开始创作 <span>↗</span></a>
+      <a className="nav-cta" href="/signup">开始创作 <span>↗</span></a>
     </header>
 
     <main>
@@ -55,7 +56,7 @@ export function LandingPage() {
           <p className="overline">小QTV / VIDEO PRODUCTION WORKSTATION</p>
           <h1><SplitText text="参考一条视频，" /><SplitText text="快速做出" accent /><br /><SplitText text="属于你的新作品。" /></h1>
           <p className="hero-lede">不用学复杂节点，也能做出有风格的短视频。小QTV 提取镜头语言与制作方法，不复制参考作品的具体内容。</p>
-          <div className="hero-actions"><a className="button button-primary" href="/create">立即免费创作 <span>↗</span></a><a className="button button-secondary" href="#demo">观看 60 秒演示 <span>▶</span></a></div>
+          <button className="button button-secondary" type="button" onClick={() => setDemoOpen(true)}>观看 60 秒演示 <span>▶</span></button>
           <p className="hero-note">注册即获少量生成额度 · 免费版带水印 · 每一步由你确认</p>
         </div>
         <div className="hero-visual" id="demo" role="img" aria-label="参考片与新作品并排示意，中间浮出风格分析卡片">
@@ -103,6 +104,41 @@ export function LandingPage() {
 
       <section className="section-shell section-block faq-block"><Reveal><div className="section-intro compact"><p className="overline">FAQ</p><h2>开始之前，先回答几个问题。</h2></div><div className="faq-list">{[['会复制参考视频吗？', '不会。小QTV提取的是镜头语言与制作方法，不复制参考作品的具体内容。请确保你拥有上传素材的使用权。'], ['我需要会用专业节点吗？', '不需要。你可以从一句话创意开始，每一步确认后继续。复杂项目再进入专业工作台。'], ['可以只改一个镜头吗？', '可以。锁定满意镜头后，只对不满意的镜头发起局部重做。'], ['什么时候会产生费用？', '涉及付费生成或覆盖已有结果时，系统会先提示并等待你的确认。']].map(([question, answer], index) => <div className={`faq-item ${openFaq === index ? 'open' : ''}`} key={question}><button onClick={() => setOpenFaq(openFaq === index ? null : index)} aria-expanded={openFaq === index}><span>{question}</span><b>{openFaq === index ? '−' : '+'}</b></button>{openFaq === index && <p>{answer}</p>}</div>)}</div></Reveal></section>
     </main>
-    <footer className="marketing-footer"><div className="section-shell footer-inner"><span>小QTV · 懂镜头语言的创作搭档</span><a href="/create">开始创作 ↗</a></div></footer>
+      {demoOpen && (
+        <div className="demo-backdrop" role="presentation" onClick={() => setDemoOpen(false)}>
+          <div className="demo-modal" role="dialog" aria-modal="true" aria-labelledby="demo-title" onClick={event => event.stopPropagation()}>
+            <button className="demo-close" type="button" aria-label="关闭演示" onClick={() => setDemoOpen(false)}>×</button>
+            <p className="overline">60 SECOND DEMO · PLACEHOLDER CUT</p>
+            <h2 id="demo-title">从参考到成片，四步看清方法。</h2>
+            <p className="demo-lede">首版使用分镜脚本与占位视频；真实录屏接入后，这条演示会替换成完整操作过程。</p>
+            <div className="demo-progress" aria-label="演示流程">
+              {['分析参考', '生成分镜', '生成镜头', '合成视频'].map((step, index) => (
+                <span key={step}><b>0{index + 1}</b>{step}</span>
+              ))}
+            </div>
+            <div className="demo-screen">
+              <div className="demo-screen-main">
+                <div className="demo-screen-label">参考视频</div>
+                <div className="demo-screen-placeholder">占位视频：雨夜街道参考片</div>
+              </div>
+              <div className="demo-screen-arrow" aria-hidden="true">→</div>
+              <div className="demo-screen-main is-result">
+                <div className="demo-screen-label">新作品</div>
+                <div className="demo-screen-placeholder">占位视频：15 秒原创口播</div>
+              </div>
+            </div>
+            <div className="demo-analysis">
+              <span>镜头节奏 <b>68</b></span>
+              <span>景别结构 <b>52</b></span>
+              <span>情绪曲线 <b>41</b></span>
+            </div>
+            <div className="demo-actions">
+              <button className="button button-secondary" type="button" onClick={() => setDemoOpen(false)}>稍后再看</button>
+              <a className="button button-primary" href="/create" onClick={() => setDemoOpen(false)}>开始四步创作 <span>↗</span></a>
+            </div>
+          </div>
+        </div>
+      )}
+    <footer className="marketing-footer"><div className="section-shell footer-inner"><span>小QTV · 懂镜头语言的创作搭档</span><a href="/signup">开始创作 ↗</a></div></footer>
   </div>;
 }

@@ -30,3 +30,12 @@
 @keyframes source-scan { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
 @media (max-width: 767px) { .module-toolbar { align-items: stretch; flex-direction: column; }.module-actions, .source-import-form { justify-content: stretch; }.module-actions > *, .source-import-form > * { flex: 1; }.source-import-form input, .source-import-form select { min-width: 0; width: 100%; }.source-analysis-grid { grid-template-columns: 1fr; gap: var(--space-4); }.source-card-head { align-items: flex-start; }.source-card-head > .badge { margin-inline-start: auto; }.finding-row { grid-template-columns: minmax(0, 1fr) auto; }.finding-scale { grid-column: 1 / -1; }.composer { align-items: stretch; flex-direction: column; }.composer .primary { width: 100%; } }
 @media (prefers-reduced-motion: reduce) { .job-thumb.loading { animation: none; }.source-card, .shot-row, .asset-card { transition: none; } }
+
+/* Agent 高风险动作确认：付费、覆盖或局部重做必须先得到用户确认。 */
+.agent-confirm { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-block-start: var(--space-3); padding: var(--space-4); border: var(--border-width-hair) solid var(--color-orange-400, #d97706); border-radius: var(--radius-md); background: var(--color-orange-50, #fff7ed); color: var(--ink-1); }
+.agent-confirm b { display: block; color: var(--ink-0); font-size: var(--text-label); }
+.agent-confirm p { margin: var(--space-1) 0 0; color: var(--ink-2); font-size: var(--text-micro); line-height: 1.6; }
+.agent-confirm-actions { display: flex; flex: 0 0 auto; gap: var(--space-2); }
+.agent-confirm-actions button { min-height: var(--control-h); padding-inline: var(--space-3); border: var(--border-width-hair) solid var(--line-strong); border-radius: var(--radius-md); color: var(--ink-1); background: var(--surface-0); font-size: var(--text-label); }
+.agent-confirm-actions .primary { border-color: transparent; color: var(--fg-on-emphasis); background: var(--brand-400); }
+@media (max-width: 767px) { .agent-confirm { align-items: stretch; flex-direction: column; }.agent-confirm-actions { justify-content: flex-end; } }

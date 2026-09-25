@@ -12,12 +12,11 @@ import {
  * 守两件事，都属于「错了不会报错、只会表现得像正常」的那类：
  *
  *   1. 路径 → 路由的映射。未知路径必须回落落地页，而不是白屏或抛错。
- *      这三条脸（/ · /create · /workbench）是整个网页端的骨架，
+ *      这四条脸（/ · /signup · /create · /workbench）是整个网页端的骨架，
  *      一条链接写错就整页空白，所以边界要钉死。
  *
- *   2. 站内 <a> 点击的拦截判定。落地页有 6 处裸 <a>（nav-cta、立即免费创作、
- *      观看 60 秒演示…），全靠这段分支决定是走前端路由、交给浏览器滚动、
- *      还是原样放行。判断错了表现很隐蔽：要么 #demo 锚点失效，
+ *   2. 站内 <a> 点击的拦截判定。落地页里的裸 <a> 全靠这段分支决定是走前端路由、
+ *      交给浏览器滚动，还是原样放行。判断错了表现很隐蔽：要么锚点失效，
  *      要么每次点击都退化成整页重载。
  */
 
@@ -28,6 +27,11 @@ describe('matchRoute', () => {
   it('根路径与空路径都落到落地页', () => {
     expect(matchRoute('/')).toEqual({ name: 'landing' });
     expect(matchRoute('')).toEqual({ name: 'landing' });
+  });
+
+  it('/signup 落到注册引导页', () => {
+    expect(matchRoute('/signup')).toEqual({ name: 'signup' });
+    expect(matchRoute('/signup/extra')).toEqual({ name: 'signup' });
   });
 
   it('/create 落到消费级四步动线', () => {
@@ -69,7 +73,8 @@ describe('projectHref', () => {
 });
 
 describe('resolveLinkDecision', () => {
-  it('站内三条脸的裸 <a> 走前端跳转', () => {
+  it('站内四条脸的裸 <a> 走前端跳转', () => {
+    expect(resolveLinkDecision(`${ORIGIN}/signup`, HERE)).toEqual({ kind: 'navigate', to: '/signup' });
     expect(resolveLinkDecision(`${ORIGIN}/create`, HERE)).toEqual({ kind: 'navigate', to: '/create' });
     expect(resolveLinkDecision(`${ORIGIN}/workbench`, HERE)).toEqual({ kind: 'navigate', to: '/workbench' });
     expect(resolveLinkDecision(`${ORIGIN}/workbench/p-42`, HERE)).toEqual({

@@ -3,10 +3,13 @@ import { ports, useAppData } from './useAppData';
 import { uiStore, useUiStore } from '../state/uiStore';
 import type { Asset, GenerationJob, ReferenceSource, Shot } from '../ports';
 import { rhythmShares, summarizeRhythm } from '../domain/sourceAnalysis';
+import { requiresAgentConfirmation } from '../domain/agentActions';
 import { Canvas } from '../features/canvas/Canvas';
 import { CreateFlow } from '../features/create/CreateFlow';
 import { LandingPage } from '../features/marketing/LandingPage';
-import { useRoute } from './router';
+import { SignupPage } from '../features/marketing/SignupPage';
+import { navigate, useRoute } from './router';
+import { hasSession } from '../features/auth/session';
 
 const sections = [['overview','总览','⌂'],['source','参考片','◌'],['shots','分镜','▦'],['canvas','画布','◇'],['assets','素材库','▧'],['generate','生成工作台','✦'],['director','导演台','◉'],['timeline','剪辑与成片','▤'],['agent','Agent 工作台','✳']];
 const statusText = { draft: '草稿', ready: '待审核', approved: '已通过' };
@@ -26,12 +29,95 @@ function SourceCard({ source }: { source: ReferenceSource }) { const summary = s
 function Shots({ shots }: { shots: Shot[] }) { return <div className="page"><ModuleToolbar eyebrow="分镜设计" title="镜头列表"><button className="primary" type="button" onClick={() => uiStore.set({ rightPanel: true })}>＋ 新建镜头</button></ModuleToolbar><div className="shot-list">{shots.map((s, i) => <div className="shot-row" key={s.id}><div className="shot-number">{String(i + 1).padStart(2,'0')}</div><div className={`shot-preview shot-preview-${i % 3}`}><span>▶</span></div><div className="shot-copy"><b>{s.title}</b><small>{s.scene} · {s.duration}</small><p>{s.prompt}</p></div><Badge tone={s.status === 'approved' ? 'green' : s.status === 'ready' ? 'blue' : 'muted'}>{statusText[s.status]}</Badge></div>)}</div></div>; }
 function Assets({ assets }: { assets: Asset[] }) { return <div className="page"><ModuleToolbar eyebrow="素材库" title="项目素材"><button className="primary" type="button" onClick={() => uiStore.set({ rightPanel: true })}>＋ 上传素材</button></ModuleToolbar><div className="asset-grid">{assets.map(a => <div className="asset-card" key={a.id}><div className={`asset-cover asset-cover-${a.kind}`}><span>{a.kind === 'video' ? '▶' : a.kind === 'audio' ? '♫' : '✦'}</span></div><b>{a.name}</b><small>{a.meta}</small></div>)}</div></div>; }
 function Generation({ projectId, jobs, refresh }: { projectId: string; jobs: GenerationJob[]; refresh: () => Promise<void> }) { const [busy, setBusy] = useState(false); const start = async () => { setBusy(true); await ports.generation.create(projectId, '新建候选首帧', '图像生成'); await refresh(); setBusy(false); }; const running = jobs.filter(job => job.status === 'running' || job.status === 'queued').length; return <div className="page"><ModuleToolbar eyebrow="生成工作台" title="生成任务"><button className="primary" type="button" onClick={() => void start()} disabled={busy}>{busy ? '创建中…' : '＋ 新建任务'}</button></ModuleToolbar><div className="generation-layout"><div className="panel"><div className="panel-head"><div><h2>全部任务</h2><p>状态由服务端事件驱动</p></div><Badge tone="blue">{running ? `${running} 个进行中` : '暂无进行中任务'}</Badge></div>{jobs.map(j => <JobRow key={j.id} job={j} />)}</div><div className="panel cost-card"><p className="eyebrow">队列概览</p><strong>{jobs.length}</strong><p>当前项目任务总数</p><div className="progress-track"><div style={{ width: `${jobs.length ? Math.round((jobs.filter(job => job.status === 'succeeded').length / jobs.length) * 100) : 0}%` }} /></div><button className="text-button" onClick={() => uiStore.set({ rightPanel: true })}>查看任务说明 →</button></div></div></div>; }
-function Agent({ projectId }: { projectId: string }) { const [input, setInput] = useState(''); const [messages, setMessages] = useState<{ role: string; content: string }[]>([{ role: 'agent', content: '你好，我是项目助手。告诉我你想检查什么，或直接让我发起一个生成任务。' }]); const send = async (e: FormEvent) => { e.preventDefault(); if (!input.trim()) return; const text = input; setInput(''); setMessages(m => [...m, { role: 'user', content: text }]); await ports.agent.send(projectId, text); setTimeout(() => setMessages(m => [...m, { role: 'agent', content: '收到。我会检查当前项目并把结果同步到工作台。' }]), 350); }; return <div className="page agent-page"><ModuleToolbar eyebrow="Agent 工作台" title="项目助手"><button className="primary" type="button" onClick={() => setMessages([{ role: 'agent', content: '新的项目会话已准备好。' }])}>＋ 新会话</button></ModuleToolbar><div className="agent-panel panel"><div className="agent-header"><div className="agent-orb">✳</div><div><b>小Q 助手</b><small>可调用项目、分镜、素材和生成任务</small></div><Badge tone="green">在线</Badge></div><div className="chat-feed">{messages.map((m, i) => <div className={`chat-message ${m.role}`} key={i}><div className="chat-avatar">{m.role === 'agent' ? 'Q' : '你'}</div><div><p>{m.content}</p><small>刚刚</small></div></div>)}</div><form className="composer" onSubmit={send}><input value={input} onChange={e => setInput(e.target.value)} placeholder="描述你要完成的工作…" /><button className="primary" type="submit">发送 ↑</button></form></div></div>; }
+function Agent({ projectId }: { projectId: string }) {
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>([{ role: 'agent', content: '你好，我是项目助手。告诉我你想检查什么，或直接让我发起一个生成任务。' }]);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+
+  const appendMessage = (role: 'agent' | 'user', content: string) => {
+    setMessages(current => [...current, { role, content }]);
+  };
+
+  const send = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = input.trim();
+    if (!text) return;
+    setInput('');
+    appendMessage('user', text);
+
+    if (requiresAgentConfirmation(text)) {
+      setPendingAction(text);
+      appendMessage('agent', '这个动作会涉及生成额度或覆盖已有结果。我已准备好执行，但需要你先确认。');
+      return;
+    }
+
+    await ports.agent.send(projectId, text);
+    window.setTimeout(() => appendMessage('agent', '收到。我会检查当前项目并把结果同步到工作台。'), 350);
+  };
+
+  const cancelAction = () => {
+    setPendingAction(null);
+    appendMessage('agent', '已取消这次执行，原始结果保持不变。');
+  };
+
+  const confirmAction = async () => {
+    if (!pendingAction) return;
+    const action = pendingAction;
+    setPendingAction(null);
+    await ports.agent.send(projectId, action);
+    appendMessage('agent', '已按你的确认执行；如需撤销，请在对应镜头卡片上选择恢复上一版。');
+  };
+
+  return (
+    <div className="page agent-page">
+      <ModuleToolbar eyebrow="Agent 工作台" title="项目助手">
+        <button className="primary" type="button" onClick={() => { setPendingAction(null); setMessages([{ role: 'agent', content: '新的项目会话已准备好。' }]); }}>＋ 新会话</button>
+      </ModuleToolbar>
+      <div className="agent-panel panel">
+        <div className="agent-header">
+          <div className="agent-orb">✳</div>
+          <div><b>小Q 助手</b><small>可调用项目、分镜、素材和生成任务</small></div>
+          <Badge tone="green">在线</Badge>
+        </div>
+        <div className="chat-feed">
+          {messages.map((message, index) => (
+            <div className={`chat-message ${message.role}`} key={index}>
+              <div className="chat-avatar">{message.role === 'agent' ? 'Q' : '你'}</div>
+              <div><p>{message.content}</p><small>刚刚</small></div>
+            </div>
+          ))}
+          {pendingAction && (
+            <div className="agent-confirm" role="alertdialog" aria-label="确认高风险动作">
+              <div><b>确认后才会执行</b><p>「{pendingAction}」可能消耗生成额度或覆盖已有结果。</p></div>
+              <div className="agent-confirm-actions">
+                <button type="button" onClick={cancelAction}>取消</button>
+                <button className="primary" type="button" onClick={() => void confirmAction()}>确认执行</button>
+              </div>
+            </div>
+          )}
+        </div>
+        <form className="composer" onSubmit={send}>
+          <input value={input} onChange={event => setInput(event.target.value)} placeholder="描述你要完成的工作…" />
+          <button className="primary" type="submit">发送 ↑</button>
+        </form>
+      </div>
+    </div>
+  );
+}
 function Placeholder({ section }: { section: string }) { const copy = section === '导演台' ? { title: '导演台还没开工', body: '这里会承载镜头节奏、角色连续性与生成决策。下一步先在参考片和分镜中确认制作方向。' } : section === '剪辑与成片' ? { title: '剪辑与成片还没开工', body: '这里会承载镜头排序、局部修复结果与最终导出。下一步先完成分镜和生成任务。' } : { title: '这个模块还没开工', body: `${section} 的界面会在后续版本中加入，当前可以先使用其他工作台工具。` }; return <div className="page"><ModuleToolbar eyebrow="工作区" title={section} /><div className="empty-state"><div className="empty-icon">◇</div><h2>{copy.title}</h2><p>{copy.body}</p></div></div>; }
 function CommandPalette() { const ui = useUiStore(); if (!ui.commandPaletteOpen) return null; return <div className="modal-backdrop" onClick={() => uiStore.set({ commandPaletteOpen: false })}><div className="modal command-modal" onClick={e => e.stopPropagation()}><input autoFocus placeholder="搜索页面、镜头或命令…" onKeyDown={e => { if (e.key === 'Escape') uiStore.set({ commandPaletteOpen: false }); }} /><div className="command-list">{sections.slice(0,6).map(s => <button key={s[0]} onClick={() => { uiStore.set({ selectedSection: s[0], commandPaletteOpen: false }); }}>{s[2]}　{s[1]}<span>⌘ ↵</span></button>)}</div></div></div>; }
 export function App() {
   const route = useRoute();
+  const needsSession = route.name === 'workbench' && !hasSession();
+
+  useEffect(() => {
+    if (!needsSession) return;
+    const next = window.location.pathname + window.location.search;
+    navigate(`/signup?next=${encodeURIComponent(next)}`, { replace: true });
+  }, [needsSession]);
+
   if (route.name === 'landing') return <LandingPage />;
+  if (route.name === 'signup' || needsSession) return <SignupPage />;
   if (route.name === 'create') return <CreateFlow />;
   return <WorkbenchApp projectId={route.projectId} />;
 }
