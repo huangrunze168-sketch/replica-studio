@@ -39,12 +39,76 @@ function JobRow({ job, onRetry }: { job: GenerationJob; onRetry?: (job: Generati
     </div>
   );
 }
-function Workspace({ projectId, data }: { projectId: string; data: ReturnType<typeof useAppData> }) { const section = useUiStore().selectedSection; if (section === 'overview') return <Overview projectId={projectId} {...data} />; if (section === 'source') return <Sources projectId={projectId} sources={data.sources} refresh={data.refreshSources} />; if (section === 'shots') return <Shots shots={data.shots} />; if (section === 'assets') return <Assets assets={data.assets} />; if (section === 'generate') return <Generation projectId={projectId} jobs={data.jobs} refresh={data.refreshJobs} />; if (section === 'agent') return <Agent projectId={projectId} />; if (section === 'canvas') return <div className="page canvas-page"><Canvas projectId={projectId} /></div>; return <Placeholder section={sections.find(s => s[0] === section)?.[1] ?? '工作台'} />; }
+function Workspace({ projectId, data }: { projectId: string; data: ReturnType<typeof useAppData> }) {
+  const section = useUiStore().selectedSection;
+  if (section === 'overview') return <Overview projectId={projectId} {...data} />;
+  if (section === 'source') return <Sources projectId={projectId} sources={data.sources} refresh={data.refreshSources} />;
+  if (section === 'shots') return <Shots shots={data.shots} />;
+  if (section === 'assets') return <Assets assets={data.assets} />;
+  if (section === 'generate') return <Generation projectId={projectId} jobs={data.jobs} refresh={data.refreshJobs} />;
+  if (section === 'director') return <Director shots={data.shots} assets={data.assets} />;
+  if (section === 'timeline') return <Timeline shots={data.shots} jobs={data.jobs} />;
+  if (section === 'agent') return <Agent projectId={projectId} />;
+  if (section === 'canvas') return <div className="page canvas-page"><Canvas projectId={projectId} /></div>;
+  return <Placeholder section={sections.find(s => s[0] === section)?.[1] ?? '工作台'} />;
+}
 function ModuleToolbar({ eyebrow, title, children }: { eyebrow: string; title: string; children?: React.ReactNode }) { return <div className="module-toolbar"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></div>{children && <div className="module-actions">{children}</div>}</div>; }
 function Sources({ projectId, sources, refresh }: { projectId: string; sources: ReferenceSource[]; refresh: () => Promise<void> }) { const [name, setName] = useState(''); const [genre, setGenre] = useState('知识类口播'); const [busy, setBusy] = useState(false); const submit = async (event: FormEvent) => { event.preventDefault(); if (!name.trim() || busy) return; setBusy(true); await ports.source.create(projectId, name.trim(), genre); await refresh(); setName(''); setBusy(false); }; return <div className="page source-page"><ModuleToolbar eyebrow="参考片" title="建立你的制作参考"><form className="source-import-form" onSubmit={submit}><label><span>名称</span><input value={name} onChange={event => setName(event.target.value)} placeholder="例如：知识口播 · 开场节奏" required /></label><label><span>创作类型</span><select value={genre} onChange={event => setGenre(event.target.value)}><option>知识类口播</option><option>产品广告</option><option>情绪化剧情片</option><option>系列内容</option></select></label><button className="primary" type="submit" disabled={busy}>{busy ? '分析中…' : '导入参考片'}</button></form></ModuleToolbar>{sources.length === 0 ? <div className="empty-state source-empty"><div className="empty-icon">◌</div><h2>还没有参考片</h2><p>导入一条你拥有使用权的视频或音频，先从镜头语言开始建立制作方案。</p></div> : <div className="source-list">{sources.map(source => <SourceCard key={source.id} source={source} />)}</div>}</div>; }
 function SourceCard({ source }: { source: ReferenceSource }) { const summary = summarizeRhythm(source.rhythm); const shares = rhythmShares(source.rhythm); return <article className="source-card panel"><div className="source-card-head"><div className="source-thumb" style={{ '--source-accent': source.accent } as React.CSSProperties} aria-hidden="true"><span>{source.kind === 'video' ? '▶' : '♫'}</span></div><div className="source-meta"><h2>{source.name}</h2><p>{source.meta} · {source.genre}</p></div><Badge tone={source.status === 'analyzed' ? 'green' : 'blue'}>{source.status === 'analyzed' ? '已分析' : '分析中'}</Badge></div><div className="source-analysis-grid"><section className="source-rhythm"><div className="source-section-head"><div><h3>镜头节奏</h3><p>{summary.label}</p></div><span className="source-score">紧凑度 {summary.paceScore}</span></div><div className={`rhythm-bar ${shares.length === 0 ? 'is-empty' : ''}`} aria-label={`镜头节奏：${summary.label}`}>{shares.map((share, index) => <span key={`${source.id}-rhythm-${index}`} style={{ width: `${share}%` }} />)}</div></section><section className="source-findings"><div className="source-section-head"><h3>风格分析结论</h3><span>三项观察</span></div><div className="finding-list">{source.findings.slice(0, 3).map(finding => <div className="finding-row" key={finding.key}><div><b>{finding.label}</b><span>{finding.value}</span></div><div className="finding-scale" aria-label={`${finding.label}：刻度 ${finding.score}`}><i style={{ width: `${Math.min(100, Math.max(0, finding.score))}%` }} /></div><small>{finding.score}</small></div>)}</div></section></div></article>; }
 function Shots({ shots }: { shots: Shot[] }) { return <div className="page"><ModuleToolbar eyebrow="分镜设计" title="镜头列表"><button className="primary" type="button" onClick={() => uiStore.set({ rightPanel: true })}>＋ 新建镜头</button></ModuleToolbar><div className="shot-list">{shots.map((s, i) => <div className="shot-row" key={s.id}><div className="shot-number">{String(i + 1).padStart(2,'0')}</div><div className={`shot-preview shot-preview-${i % 3}`}><span>▶</span></div><div className="shot-copy"><b>{s.title}</b><small>{s.scene} · {s.duration}</small><p>{s.prompt}</p></div><Badge tone={s.status === 'approved' ? 'green' : s.status === 'ready' ? 'blue' : 'muted'}>{statusText[s.status]}</Badge></div>)}</div></div>; }
 function Assets({ assets }: { assets: Asset[] }) { return <div className="page"><ModuleToolbar eyebrow="素材库" title="项目素材"><button className="primary" type="button" onClick={() => uiStore.set({ rightPanel: true })}>＋ 上传素材</button></ModuleToolbar><div className="asset-grid">{assets.map(a => <div className="asset-card" key={a.id}><div className={`asset-cover asset-cover-${a.kind}`}><span>{a.kind === 'video' ? '▶' : a.kind === 'audio' ? '♫' : '✦'}</span></div><b>{a.name}</b><small>{a.meta}</small></div>)}</div></div>; }
+function Director({ shots, assets }: { shots: Shot[]; assets: Asset[] }) {
+  const approved = shots.filter(shot => shot.status === 'approved').length;
+  const referenceAssets = assets.filter(asset => asset.kind === 'image').slice(0, 3);
+  return (
+    <div className="page director-page">
+      <ModuleToolbar eyebrow="导演台" title="镜头语言与主体一致性">
+        <button className="primary" type="button" onClick={() => uiStore.set({ rightPanel: true })}>查看导演建议</button>
+      </ModuleToolbar>
+      <div className="director-grid">
+        <section className="panel director-rhythm">
+          <div className="panel-head"><div><h2>节奏诊断</h2><p>根据当前分镜读取镜头结构</p></div><Badge tone="blue">{shots.length} 镜</Badge></div>
+          <div className="director-bars">{shots.map((shot, index) => <div className="director-bar-row" key={shot.id}><span>0{index + 1}</span><i style={{ width: `${Math.max(34, Math.min(100, Number(shot.duration.split(':')[1] ?? 4) * 18))}%` }} /><small>{shot.duration}</small></div>)}</div>
+          <div className="director-summary"><span>已确认镜头 <b>{approved}</b></span><span>待导演复核 <b>{Math.max(0, shots.length - approved)}</b></span></div>
+        </section>
+        <section className="panel subject-board">
+          <div className="panel-head"><div><h2>主体一致性</h2><p>参考图与角色档案</p></div><Badge tone="green">稳定</Badge></div>
+          <div className="subject-grid">{referenceAssets.map(asset => <div className="subject-card" key={asset.id}><div className={`asset-cover asset-cover-${asset.kind}`}>✦</div><b>{asset.name}</b><small>{asset.meta}</small></div>)}{referenceAssets.length === 0 && <div className="subject-empty">暂无主体参考图</div>}</div>
+        </section>
+        <section className="panel director-suggestions">
+          <div className="panel-head"><div><h2>导演建议</h2><p>先看建议，再决定是否执行</p></div><Badge tone="muted">待确认</Badge></div>
+          <div className="suggestion-list"><article><b>提高开场镜节奏</b><p>把第一镜缩短 0.4 秒，保留结尾留白。</p><button type="button" onClick={() => uiStore.set({ selectedSection: 'shots' })}>查看镜头 →</button></article><article><b>统一主体参考</b><p>把主角参考图应用到后续三个镜头。</p><button type="button" onClick={() => uiStore.set({ selectedSection: 'assets' })}>打开素材库 →</button></article></div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function Timeline({ shots, jobs }: { shots: Shot[]; jobs: GenerationJob[] }) {
+  const completedJobs = jobs.filter(job => job.status === 'succeeded').length;
+  return (
+    <div className="page timeline-page">
+      <ModuleToolbar eyebrow="剪辑与成片" title="时间线与导出">
+        <button className="primary" type="button" onClick={() => uiStore.set({ selectedSection: 'generate' })}>查看生成队列</button>
+      </ModuleToolbar>
+      <div className="timeline-layout">
+        <section className="panel timeline-editor">
+          <div className="panel-head"><div><h2>主时间线</h2><p>按镜头排列当前版本</p></div><Badge tone="blue">{shots.length} 段</Badge></div>
+          <div className="timeline-track">{shots.map((shot, index) => <div className={`timeline-clip clip-${index % 4}`} key={shot.id}><span>0{index + 1}</span><b>{shot.title}</b><small>{shot.duration}</small></div>)}</div>
+          <div className="timeline-audio"><span>♫</span><div><b>参考节奏轨</b><small>已对齐 {shots.length} 个镜头</small></div></div>
+        </section>
+        <section className="panel export-panel">
+          <div className="panel-head"><div><h2>成片状态</h2><p>从分镜到导出的当前进度</p></div><Badge tone={completedJobs > 0 ? 'green' : 'muted'}>{completedJobs > 0 ? '可预览' : '待生成'}</Badge></div>
+          <div className="export-stat"><strong>{Math.round((shots.filter(shot => shot.status === 'approved').length / Math.max(1, shots.length)) * 100)}%</strong><span>镜头确认进度</span></div>
+          <div className="progress-track"><div style={{ width: `${Math.round((completedJobs / Math.max(1, jobs.length)) * 100)}%` }} /></div>
+          <div className="export-options-summary"><span>画幅 9:16</span><span>低清预览</span><span>小QTV水印</span></div>
+          <button className="button button-primary" type="button" onClick={() => navigate('/create')}>进入四步导出流程 <span>↗</span></button>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function Generation({ projectId, jobs, refresh }: { projectId: string; jobs: GenerationJob[]; refresh: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [pendingRetry, setPendingRetry] = useState<GenerationJob | null>(null);
