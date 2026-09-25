@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { navigate } from '../../app/router';
+import { canUseFreeRetake, evaluateFreeExport, freePlan } from '../../domain/entitlements';
 
 const steps: Array<[string, string, string]> = [
   ['01', '上传参考片', '输入一句话也能开始，系统先读懂参考。'],
@@ -29,7 +30,9 @@ export function CreateFlow() {
   const [generating, setGenerating] = useState(false);
   const [retaking, setRetaking] = useState<number | null>(null);
   const [pendingShot, setPendingShot] = useState<ShotAction | null>(null);
+  const [pendingBatchRetake, setPendingBatchRetake] = useState(false);
   const [shotNotice, setShotNotice] = useState('');
+  const [freeRetakesRemaining, setFreeRetakesRemaining] = useState<number>(freePlan.localRetakes);
   const [ratio, setRatio] = useState('9:16');
   const [quality, setQuality] = useState('低清预览');
   const [exportState, setExportState] = useState<ExportState>('idle');
@@ -38,6 +41,16 @@ export function CreateFlow() {
     if (index < activeStep) return 'done';
     if (index === activeStep) return 'active';
     return 'pending';
+  };
+
+  const confirmBatchRetake = () => {
+    setPendingBatchRetake(false);
+    if (!canUseFreeRetake(freeRetakesRemaining)) {
+      setShotNotice('免费体验的 1 次局部重做已使用；继续批量重做需要付费或订阅确认。');
+      return;
+    }
+    setFreeRetakesRemaining(value => Math.max(0, value - 1));
+    regenerateUnlocked();
   };
 
   const toggleShot = (index: number) => {
@@ -55,10 +68,16 @@ export function CreateFlow() {
 
   const confirmShotAction = () => {
     if (!pendingShot) return;
+    if (pendingShot.kind === 'retake' && !canUseFreeRetake(freeRetakesRemaining)) {
+      setPendingShot(null);
+      setShotNotice('免费体验的 1 次局部重做已使用；继续重做需要付费或订阅确认。');
+      return;
+    }
     const action = pendingShot;
     setPendingShot(null);
     if (action.kind === 'restore') {
       setShotVersions(current => current.map((version, index) => index === action.index ? Math.max(1, version - 1) : version));
+      setFreeRetakesRemaining(value => Math.max(0, value - 1));
       setShotNotice(`镜头 ${action.index + 1} 已恢复到上一版，当前预览被替换。`);
       return;
     }
@@ -154,8 +173,8 @@ export function CreateFlow() {
         {activeStep === 2 && (
           <div className="storyboard-shell">
             <div className="storyboard-toolbar">
-              <div><p className="overline">LOW-RES PREVIEW</p><h2>逐镜确认与局部重做</h2></div>
-              <button className="button button-secondary" type="button" onClick={regenerateUnlocked} disabled={generating || retaking !== null}>{generating ? '生成中…' : '重新生成未锁定镜头'}</button>
+              <div><p className="overline">LOW-RES PREVIEW</p><h2>逐镜确认与局部重做</h2><small className="free-quota">免费体验剩余局部重做 {freeRetakesRemaining} 次</small></div>
+              <button className="button button-secondary" type="button" onClick={() => setPendingBatchRetake(true)} disabled={generating || retaking !== null}>{generating ? '生成中…' : '重新生成未锁定镜头'}</button>
             </div>
             {(generating || retaking !== null) && <div className="generation-status"><span className="ui-loader" /><div><b>{retaking !== null ? `正在重做镜头 ${retaking + 1}` : '正在生成镜头'}</b><small>分析参考 → 生成分镜 → 生成镜头 → 合成视频</small></div></div>}
             {shotNotice && <div className="shot-notice" role="status">{shotNotice}</div>}
@@ -171,7 +190,7 @@ export function CreateFlow() {
                       <p>{index === 0 ? '一句话提出核心问题，快速建立注意力。' : '沿用参考节奏，内容与表达保持原创。'}</p>
                       <div className="shot-actions">
                         <button type="button" onClick={() => toggleShot(index)}>{locked ? '✓ 已锁定' : '锁定这一镜'}</button>
-                        {!locked && <button type="button" onClick={() => setPendingShot({ index, kind: 'retake' })}>局部重做</button>}
+                        {!locked && <button type="button" disabled={!canUseFreeRetake(freeRetakesRemaining)} onClick={() => setPendingShot({ index, kind: 'retake' })}>{canUseFreeRetake(freeRetakesRemaining) ? '局部重做' : '免费重做已用完'}</button>}
                         {shotVersions[index] > 1 && <button type="button" onClick={() => setPendingShot({ index, kind: 'restore' })}>恢复上一版</button>}
                       </div>
                     </div>
@@ -212,6 +231,17 @@ export function CreateFlow() {
         </div>
       </main>
 
+      {pendingBatchRetake && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setPendingBatchRetake(false)}>
+          <div className="modal shot-confirm-modal" role="dialog" aria-modal="true" onClick={event => event.stopPropagation()}>
+            <p className="overline">BATCH LOCAL RETAKE</p>
+            <h2>重新生成所有未锁定镜头？</h2>
+            <p>这会消耗免费体验中的 1 次局部重做额度，并生成新的镜头版本；已锁定镜头不会被覆盖。</p>
+            <div className="modal-actions"><button className="button button-secondary" type="button" onClick={() => setPendingBatchRetake(false)}>取消</button><button className="button button-primary" type="button" onClick={confirmBatchRetake}>确认批量重做</button></div>
+          </div>
+        </div>
+      )}
+
       {pendingShot && (
         <div className="modal-backdrop" role="presentation" onClick={() => setPendingShot(null)}>
           <div className="modal shot-confirm-modal" role="dialog" aria-modal="true" onClick={event => event.stopPropagation()}>
@@ -228,7 +258,7 @@ export function CreateFlow() {
           <div className="modal export-confirm-modal" role="dialog" aria-modal="true" onClick={event => event.stopPropagation()}>
             <p className="overline">EXPORT CONFIRMATION</p>
             <h2>确认导出成片</h2>
-            <p>本次导出规格为 <b>{ratio} · {quality}</b>。免费体验导出将带小QTV水印；确认后开始合成视频。</p>
+            <p>本次导出规格为 <b>{ratio} · {quality}</b>。{evaluateFreeExport(15, quality).reason}确认后开始合成视频。</p>
             <div className="modal-actions">
               <button className="button button-secondary" type="button" onClick={() => setExportState('idle')}>返回修改</button>
               <button className="button button-primary" type="button" onClick={() => startExport()}>确认并导出</button>

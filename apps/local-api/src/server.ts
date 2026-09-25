@@ -57,6 +57,7 @@ export function buildServer(service: ProjectService, kernel?: KernelBinding, opt
   });
   app.get('/api/v1/projects', async () => service.listProjects());
   app.get<{ Params: { projectId: string } }>('/api/v1/projects/:projectId', async (request, reply) => {
+  app.get('/api/v1/projects/trash', async () => service.listTrashedProjects());
     try { return service.getProject(request.params.projectId); }
     catch (error) { const result = toPublicError(error); return reply.code(result.statusCode).send(result.body); }
   });

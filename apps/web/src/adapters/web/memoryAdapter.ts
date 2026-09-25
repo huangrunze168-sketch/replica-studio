@@ -1,9 +1,9 @@
-import type { AppPorts, AgentMessage, Asset, GenerationJob, ProjectPort, ProjectSummary, ReferenceSource, Shot, SourceFinding } from '../../ports';
+import type { AppPorts, AgentMessage, Asset, GenerationJob, ProjectPort, ProjectSummary, ReferenceSource, Shot, SourceFinding } from '../../ports/index.js';
 
 const projects: ProjectSummary[] = [
-  { id: 'p-demo', name: '雨夜追踪 · Demo', description: '一支 60 秒城市悬疑短片', updatedAt: '刚刚', status: 'active', shots: 12, assets: 28, progress: 68 },
-  { id: 'p-brand', name: '品牌片 2026', description: '产品视觉与社媒切片', updatedAt: '昨天', status: 'active', shots: 8, assets: 16, progress: 34 },
-  { id: 'p-archive', name: '山海志先导片', description: '已归档的概念验证项目', updatedAt: '2026-08-18', status: 'archived', shots: 24, assets: 53, progress: 100 },
+  { id: 'p-demo', name: '雨夜追踪 · Demo', description: '一支 60 秒城市悬疑短片', updatedAt: '刚刚', status: 'active', shots: 12, assets: 28, progress: 68, revision: 4, state: 'PRODUCTION', maxBudgetCents: 2000, rightsConfirmed: true },
+  { id: 'p-brand', name: '品牌片 2026', description: '产品视觉与社媒切片', updatedAt: '昨天', status: 'active', shots: 8, assets: 16, progress: 34, revision: 2, state: 'PRODUCTION', maxBudgetCents: 1200, rightsConfirmed: true },
+  { id: 'p-archive', name: '山海志先导片', description: '已归档的概念验证项目', updatedAt: '2026-08-18', status: 'archived', shots: 24, assets: 53, progress: 100, revision: 12, state: 'ARCHIVED', maxBudgetCents: 3000, rightsConfirmed: true },
 ];
 const shots: Shot[] = [
   { id: 's1', title: '01 · 霓虹下的脚步', scene: '外景 / 雨夜街道', status: 'approved', duration: '00:05', prompt: '湿润柏油路上的霓虹倒影，手持跟拍，35mm' },
@@ -79,7 +79,61 @@ const sources: ReferenceSource[] = [
 const messages: AgentMessage[] = [{ id: 'm1', role: 'agent', content: '你好，我是项目 Agent。可以帮你检查镜头连续性、整理素材，或发起生成任务。', createdAt: '刚刚' }];
 const delay = <T,>(value: T) => new Promise<T>(resolve => setTimeout(() => resolve(value), 100));
 export const memoryAdapter: AppPorts = {
-  projects: { list: () => delay(projects), get: id => delay(projects.find(p => p.id === id)), create: input => { const p = { ...input, id: `p-${Date.now()}`, updatedAt: '刚刚', status: 'active' as const, shots: 0, assets: 0, progress: 0 }; projects.unshift(p); return delay(p); } } satisfies ProjectPort,
+  projects: {
+    list: () => delay(projects.filter(project => project.status === 'active')),
+    listArchived: () => delay(projects.filter(project => project.status === 'archived')),
+    get: id => delay(projects.find(project => project.id === id)),
+    create: input => {
+      const project: ProjectSummary = { name: input.name, description: input.description, id: `p-${Date.now()}`, updatedAt: '刚刚', status: 'active', shots: 0, assets: 0, progress: 0, revision: 1, state: 'EMPTY', maxBudgetCents: input.maxBudgetCents ?? 0, rightsConfirmed: input.rightsConfirmed ?? false };
+      projects.unshift(project);
+      return delay(project);
+    },
+    rename: (id, name) => {
+      const project = projects.find(item => item.id === id);
+      if (!project) throw new Error('项目不存在');
+      project.name = name.trim();
+      project.updatedAt = '刚刚';
+      project.revision += 1;
+      return delay(project);
+    },
+    trash: id => {
+      const project = projects.find(item => item.id === id);
+      if (!project) throw new Error('项目不存在');
+      project.status = 'archived';
+      project.state = 'ARCHIVED';
+      project.updatedAt = '刚刚';
+      project.revision += 1;
+      return delay(project);
+    },
+    restore: id => {
+      const project = projects.find(item => item.id === id);
+      if (!project) throw new Error('项目不存在');
+      project.status = 'active';
+      project.state = 'PRODUCTION';
+      project.updatedAt = '刚刚';
+      project.revision += 1;
+      return delay(project);
+    },
+    purge: id => {
+      const index = projects.findIndex(item => item.id === id);
+      if (index >= 0) projects.splice(index, 1);
+      return delay(undefined);
+    },
+    duplicate: id => {
+      const source = projects.find(item => item.id === id);
+      if (!source) throw new Error('项目不存在');
+      const copy: ProjectSummary = { ...source, id: `p-${Date.now()}`, name: `${source.name} · 副本`, updatedAt: '刚刚', status: 'active', state: 'EMPTY', shots: 0, assets: 0, progress: 0, revision: 1, rightsConfirmed: false };
+      projects.unshift(copy);
+      return delay(copy);
+    },
+    updateSettings: id => {
+      const project = projects.find(item => item.id === id);
+      if (!project) throw new Error('项目不存在');
+      project.updatedAt = '刚刚';
+      project.revision += 1;
+      return delay(project);
+    },
+  } satisfies ProjectPort,
   shots: { list: () => delay(shots) },
   media: { listAssets: () => delay(assets) },
   source: {
