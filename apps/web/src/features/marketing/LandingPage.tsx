@@ -33,6 +33,52 @@ function Placeholder({ label, children }: { label: string; children?: ReactNode 
   return <div className="media-placeholder" aria-label={`占位：${label}`}><span className="placeholder-icon">✦</span><b>这里需要：{label}</b>{children && <small>{children}</small>}</div>;
 }
 
+function WorkflowVisual({ index }: { index: number }) {
+  const labels = ['参考片分析', '风格与主体', '分镜与镜头', '精修导出'];
+  return (
+    <div className={`workflow-visual workflow-visual-${index}`} role="img" aria-label={`${labels[index]}界面缩略图`}>
+      {index === 0 && (
+        <>
+          <div className="mini-window">
+            <div className="mini-window-bar"><i /><i /><i /><span>reference.mp4</span></div>
+            <div className="mini-upload"><span>◌</span><b>拖入参考视频</b><small>自动分析镜头节奏</small></div>
+          </div>
+          <div className="mini-analysis"><span>镜头节奏</span><b>2.4s / 镜</b><i style={{ width: '68%' }} /></div>
+        </>
+      )}
+      {index === 1 && (
+        <>
+          <div className="mini-window">
+            <div className="mini-window-bar"><i /><i /><i /><span>direction</span></div>
+            <div className="mini-swatches"><span /><span /><span /><span /></div>
+            <div className="mini-subject"><b>主角 · 林</b><small>保持主体一致</small></div>
+          </div>
+          <div className="mini-tag-list"><span>电影纪实</span><span>知识感</span><span>情绪胶片</span></div>
+        </>
+      )}
+      {index === 2 && (
+        <>
+          <div className="mini-window">
+            <div className="mini-window-bar"><i /><i /><i /><span>storyboard</span></div>
+            <div className="mini-storyboard">
+              {[0, 1, 2, 3].map(frame => <div key={frame} className={frame < 2 ? 'is-locked' : ''}><span>0{frame + 1}</span><b>{frame < 2 ? '✓' : '✦'}</b></div>)}
+            </div>
+          </div>
+          <div className="mini-progress"><i style={{ width: '74%' }} /><small>低清预览 74%</small></div>
+        </>
+      )}
+      {index === 3 && (
+        <>
+          <div className="mini-window">
+            <div className="mini-window-bar"><i /><i /><i /><span>export</span></div>
+            <div className="mini-export"><span>9:16 · 低清预览</span><b>带小QTV水印</b><button type="button">导出 MP4 ↗</button></div>
+          </div>
+          <div className="mini-export-status"><span>✓</span> 合成完成 · 可进入工作台</div>
+        </>
+      )}
+    </div>
+  );
+}
 function SplitText({ text, accent = false }: { text: string; accent?: boolean }) {
   return <span className={accent ? 'split-text split-text-accent' : 'split-text'} aria-label={text}>{Array.from(text).map((character, index) => <span className="split-char" aria-hidden="true" style={{ '--char-index': index } as React.CSSProperties} key={`${character}-${index}`}>{character === ' ' ? '\u00a0' : character}</span>)}</span>;
 }
@@ -96,7 +142,7 @@ export function LandingPage() {
 
       <section className="evidence-band" id="evidence"><div className="section-shell"><Reveal><div className="section-intro light"><p className="overline">WHY TRUST IT</p><h2>先把能验证的事实说清楚。</h2><p>以下是目前已有的工程与链路证据，不把待验证的目标写成结果。</p></div><div className="evidence-grid"><div><strong>116</strong><span>条对标项已逐条核验</span></div><div><strong>93</strong><span>条已有实测结果</span></div><div><strong>1755</strong><span>个测试通过</span></div><div><strong>G0–G5</strong><span>人工闸门 · 未选帧时付费请求为 0</span></div></div><div className="evidence-note">真实付费生成链路已端到端跑通，并产出真实 mp4。数据条为静态事实展示，不使用前端计数动画。</div></Reveal></div></section>
 
-      <section className="section-shell section-block" id="workflow"><Reveal><div className="section-intro"><p className="overline">FROM REFERENCE TO FINAL CUT</p><h2>四步出一支片。</h2><p>全流程自动化，零经验也能快速产出专业级成片。</p></div><div className="workflow-grid">{['上传参考片或音乐并分析', '定风格与角色 / 主体', '生成并调整分镜', '精修与导出'].map((step, index) => <article className="workflow-step" key={step}><span>0{index + 1}</span><div className="step-visual"><Placeholder label="四步动线示意图" >第 {index + 1} 步的界面缩略图占位</Placeholder></div><h3>{step}</h3><p>{['输入一句话也能开始，系统先读懂参考。', '用预设、文字或参考素材组合你的视觉方向。', '先看低清结果，再锁定满意镜头。', '只重做局部，选择画幅与分辨率后导出。'][index]}</p></article>)}</div></Reveal></section>
+      <section className="section-shell section-block" id="workflow"><Reveal><div className="section-intro"><p className="overline">FROM REFERENCE TO FINAL CUT</p><h2>四步出一支片。</h2><p>全流程自动化，零经验也能快速产出专业级成片。</p></div><div className="workflow-grid">{['上传参考片或音乐并分析', '定风格与角色 / 主体', '生成并调整分镜', '精修与导出'].map((step, index) => <article className="workflow-step" key={step}><span>0{index + 1}</span><div className="step-visual"><WorkflowVisual index={index} /></div><h3>{step}</h3><p>{['输入一句话也能开始，系统先读懂参考。', '用预设、文字或参考素材组合你的视觉方向。', '先看低清结果，再锁定满意镜头。', '只重做局部，选择画幅与分辨率后导出。'][index]}</p></article>)}</div></Reveal></section>
 
       <section className="section-shell section-block proof-block"><Reveal><div className="proof-layout"><div className="proof-copy"><p className="overline">A WORKSPACE THAT GROWS WITH YOU</p><h2>从一条示例片，<br /><em>走进你的工作台。</em></h2><p>消费级入口先让你完成一支片；复杂需求再升级到专业工作台。项目、分镜、素材和生成任务保持同一条链路。</p><a className="text-link" href="/create">进入示例项目 ↗</a></div><Placeholder label="工作台截图">建议：展示画布、分镜、素材库与生成状态的专业工作台缩略图。</Placeholder></div></Reveal></section>
 
