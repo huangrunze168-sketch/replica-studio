@@ -129,7 +129,6 @@ export function LandingPage() {
   return <div className="marketing-page">
     <header className="marketing-nav">
       <a className="marketing-brand" href="/" aria-label="小QTV 首页"><span className="brand-symbol">Q</span><span>小QTV</span></a>
-      <nav className="marketing-links" aria-label="主导航"><a href="#method">方法</a><a href="#workflow">流程</a><a href="#evidence">凭什么信</a></nav>
       <a className="nav-cta" href="/signup">开始创作 <span>↗</span></a>
     </header>
 
@@ -178,7 +177,6 @@ export function LandingPage() {
 
       <section className="section-shell section-block value-block"><Reveal><div className="section-intro"><p className="overline">THE CONTROL IS YOURS</p><h2>不是把整条片交给黑盒，<br /><em>而是把每一镜握在手里。</em></h2></div><div className="value-grid"><article><strong>锁定满意镜头</strong><p>满意的画面不会被下一次生成覆盖。</p></article><article><strong>局部重做</strong><p>只改人物、动作、构图或情绪，不推翻整片。</p></article><article><strong>每一步确认</strong><p>涉及付费生成或覆盖结果时，先由你确认。</p></article><article><strong>方法可解释</strong><p>风格分析卡片让参考片的结构看得见。</p></article></div></Reveal></section>
 
-      <section className="evidence-band" id="evidence"><div className="section-shell"><Reveal><div className="section-intro light"><p className="overline">WHY TRUST IT</p><h2>先把能验证的事实说清楚。</h2><p>以下是目前已有的工程与链路证据，不把待验证的目标写成结果。</p></div><div className="evidence-grid"><div><strong>116</strong><span>条对标项已逐条核验</span></div><div><strong>93</strong><span>条已有实测结果</span></div><div><strong>1755</strong><span>个测试通过</span></div><div><strong>G0–G5</strong><span>人工闸门 · 未选帧时付费请求为 0</span></div></div><div className="evidence-note">真实付费生成链路已端到端跑通，并产出真实 mp4。数据条为静态事实展示，不使用前端计数动画。</div></Reveal></div></section>
 
       <section className="section-shell section-block" id="workflow"><Reveal><div className="section-intro"><p className="overline">FROM REFERENCE TO FINAL CUT</p><h2>四步出一支片。</h2><p>全流程自动化，零经验也能快速产出专业级成片。</p></div><div className="workflow-grid">{['上传参考片或音乐并分析', '定风格与角色 / 主体', '生成并调整分镜', '精修与导出'].map((step, index) => <article className="workflow-step" key={step}><span>0{index + 1}</span><div className="step-visual"><WorkflowVisual index={index} /></div><h3>{step}</h3><p>{['输入一句话也能开始，系统先读懂参考。', '用预设、文字或参考素材组合你的视觉方向。', '先看低清结果，再锁定满意镜头。', '只重做局部，选择画幅与分辨率后导出。'][index]}</p></article>)}</div></Reveal></section>
 
