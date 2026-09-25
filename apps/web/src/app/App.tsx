@@ -118,6 +118,7 @@ function Agent({ projectId }: { projectId: string }) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<{ role: string; content: string }[]>([{ role: 'agent', content: '你好，我是项目助手。告诉我你想检查什么，或直接让我发起一个生成任务。' }]);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [executing, setExecuting] = useState(false);
 
   const appendMessage = (role: 'agent' | 'user', content: string) => {
     setMessages(current => [...current, { role, content }]);
@@ -146,11 +147,24 @@ function Agent({ projectId }: { projectId: string }) {
   };
 
   const confirmAction = async () => {
-    if (!pendingAction) return;
+    if (!pendingAction || executing) return;
     const action = pendingAction;
     setPendingAction(null);
-    await ports.agent.send(projectId, action);
-    appendMessage('agent', '已按你的确认执行；如需撤销，请在对应镜头卡片上选择恢复上一版。');
+    setExecuting(true);
+    try {
+      if (/生成|重做|覆盖/.test(action)) {
+        const type = /视频|片段/.test(action) ? '视频生成' : '图像生成';
+        await ports.generation.create(projectId, `Agent 确认任务 · ${action.slice(0, 40)}`, type);
+        appendMessage('agent', '已按你的确认把任务加入生成队列；队列状态会在生成工作台自动刷新。');
+      } else {
+        await ports.agent.send(projectId, action);
+        appendMessage('agent', '已按你的确认执行；如需撤销，请在对应镜头卡片上选择恢复上一版。');
+      }
+    } catch (error) {
+      appendMessage('agent', error instanceof Error ? `执行失败：${error.message}` : '执行失败，请稍后重试。');
+    } finally {
+      setExecuting(false);
+    }
   };
 
   return (
@@ -176,7 +190,7 @@ function Agent({ projectId }: { projectId: string }) {
               <div><b>确认后才会执行</b><p>「{pendingAction}」可能消耗生成额度或覆盖已有结果。</p></div>
               <div className="agent-confirm-actions">
                 <button type="button" onClick={cancelAction}>取消</button>
-                <button className="primary" type="button" onClick={() => void confirmAction()}>确认执行</button>
+                <button className="primary" type="button" disabled={executing} onClick={() => void confirmAction()}>{executing ? "执行中…" : "确认执行"}</button>
               </div>
             </div>
           )}
