@@ -164,6 +164,7 @@ export const PROJECT_CHILD_TABLES: readonly string[] = [
   'image_candidates',
   'video_intents',
   'video_generation_intents',
+  'generation_checkpoints',
   'image_generation_intents',
   /* 项目级素材生成意图（主体补全 / 音频生成）。**必须在这里**：
      它带 project_id，漏了的话 `project.purge` 会撞外键、报一句"内部错误"（踩过一次）。 */
@@ -365,7 +366,7 @@ function buildSeedShots(
 const PACKAGE_PROJECT_TABLES = [
   'events', 'shot_fields', 'gate_decisions', 'prompt_bundles', 'image_candidates', 'selections',
   'video_intents', 'spatial_plans', 'kernel_tasks', 'source_assets', 'eval_reports', 'repair_plans',
-  'image_generation_intents', 'video_generation_intents', 'asset_ratings', 'shot_playback',
+  'image_generation_intents', 'video_generation_intents', 'generation_checkpoints', 'asset_ratings', 'shot_playback',
 ] as const;
 
 function quotedIdentifier(value: string): string {
@@ -660,7 +661,7 @@ export class ProjectService {
    */
   private duplicateProject(command: Extract<DomainCommand, { type: 'project.duplicate' }>): ResultEnvelope {
     const source = this.projectForWrite(command.project_id, command.expected_revision);
-    const id = randomUUID();
+    const id = command.payload.target_project_id ?? randomUUID();
     const timestamp = now();
     const baseName = command.payload.name?.trim() || `${source.name} · 副本`;
     this.db.prepare(
@@ -735,6 +736,7 @@ export class ProjectService {
       'repair_plans',
       'image_generation_intents',
       'video_generation_intents',
+      'generation_checkpoints',
       'asset_ratings',
       'shot_playback',
     ];
@@ -1076,6 +1078,7 @@ export class ProjectService {
           deduplicated: true,
         });
       }
+
     }
 
     const intentId = randomUUID();
@@ -2709,6 +2712,7 @@ export class ProjectService {
       repair_plans: this.listRepairPlans(projectId),
       image_generations: this.listImageGenerationIntents(projectId),
       video_generations: this.listVideoGenerationIntents(projectId),
+      generation_checkpoints: this.listGenerationCheckpoints(projectId),
       /* 派生出来的产物（宫格切分等）：资产页靠它把"切出来的图"也列出来 */
       derived_artifacts: this.listProjectArtifacts(projectId),
       /* 资产评级：资产页的「N 星及以上 / 未评分」筛选靠它 */
@@ -2967,6 +2971,31 @@ export class ProjectService {
     return this.db.prepare(
       'SELECT intent_id, shot_id, model, duration_seconds, estimated_cost_cents, actual_cost_cents, provider_cost_unit, provider_cost_amount, status, clip_artifact_id, failure, reservation_released_reason, digest, reused_from_intent_id, created_at, updated_at FROM video_generation_intents WHERE project_id=? ORDER BY created_at DESC',
     ).all(projectId);
+  }
+  /**
+   * 持久化生成 Provider 的执行阶段与恢复点。
+   * 不推进项目 revision：它是执行器内部状态，改一次就让业务快照全部失效是错的。
+   */
+  recordGenerationCheckpoint(
+    projectId: string,
+    intentId: string,
+    stage: 'accepted' | 'provider_started' | 'provider_finished' | 'completed' | 'failed',
+    checkpoint: Record<string, unknown>,
+    providerTaskRef?: string | null,
+  ): void {
+    const project = this.db.prepare('SELECT id FROM projects WHERE id=?').get(projectId) as unknown as { id: string } | undefined;
+    assertDomain(project, 'PROJECT_NOT_FOUND', '项目不存在', 404);
+    this.db.prepare(
+      `INSERT INTO generation_checkpoints(intent_id, project_id, stage, provider_task_ref, checkpoint_json, updated_at)`
+        + ' VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(intent_id) DO UPDATE SET'
+        + ' project_id=excluded.project_id, stage=excluded.stage, provider_task_ref=excluded.provider_task_ref,'
+        + ' checkpoint_json=excluded.checkpoint_json, updated_at=excluded.updated_at'
+    ).run(intentId, projectId, stage, providerTaskRef ?? null, json(checkpoint), now());
+  }
+
+  listGenerationCheckpoints(projectId: string): unknown[] {
+    const rows = this.db.prepare('SELECT * FROM generation_checkpoints WHERE project_id=? ORDER BY updated_at DESC').all(projectId) as unknown as Array<{ checkpoint_json: string } & Record<string, unknown>>;
+    return rows.map(({ checkpoint_json, ...row }) => ({ ...row, checkpoint: JSON.parse(checkpoint_json) }));
   }
 
   /**

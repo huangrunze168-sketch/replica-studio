@@ -214,7 +214,7 @@ export const commandSchema = z.discriminatedUnion('type', [
    */
   z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('project.rename'), payload: z.object({ name: z.string().min(1).max(120) }) }),
   /** 复制项目基础信息、分镜、素材引用与生成历史；payload.name 可覆盖默认副本名。 */
-  z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('project.duplicate'), payload: z.object({ name: z.string().min(1).max(120).optional() }) }),
+  z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('project.duplicate'), payload: z.object({ name: z.string().min(1).max(120).optional(), target_project_id: uuidSchema.optional() }) }),
   /**
    * 项目文件夹：**只做分组**，不改变项目本身的任何事实。
    *

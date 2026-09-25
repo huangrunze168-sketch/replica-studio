@@ -319,6 +319,15 @@ export function openDatabase(path: string): DatabaseSync {
       不存 inherit 那种"显式跟随"的行，是因为它与"没有这一行"是同一件事，
       存两遍只会让读取方多判一次，也让"到底覆盖了几个镜头"变得要过滤才数得清。
     */
+    CREATE TABLE IF NOT EXISTS generation_checkpoints (
+      intent_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      stage TEXT NOT NULL,
+      provider_task_ref TEXT,
+      checkpoint_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS generation_checkpoints_project_idx ON generation_checkpoints(project_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS shot_playback (
       project_id TEXT NOT NULL REFERENCES projects(id),
       shot_id TEXT NOT NULL,

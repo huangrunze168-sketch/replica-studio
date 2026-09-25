@@ -626,6 +626,20 @@ export class GenerationService {
     private readonly backend: GenerationBackend,
   ) {}
 
+  private recordCheckpoint(
+    projectId: string,
+    intentId: string,
+    stage: 'accepted' | 'provider_started' | 'provider_finished' | 'completed' | 'failed',
+    checkpoint: Record<string, unknown>,
+    providerTaskRef?: string | null,
+  ): void {
+    try {
+      this.projects.recordGenerationCheckpoint(projectId, intentId, stage, checkpoint, providerTaskRef ?? null);
+    } catch {
+      /* 恢复点写入失败不能反过来弄坏生成任务；领域意图与结算仍以主事务为准。 */
+    }
+  }
+
   /**
    * 产物在工作目录里的绝对路径；找不到登记或文件已不在时返回 `null`。
    *
@@ -973,8 +987,14 @@ export class GenerationService {
         });
         intentId = (admitted.payload as { intent_id: string }).intent_id;
         revision = admitted.project_revision ?? revision + 1;
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'accepted', { kind: 'image', shot_id: shot.shot_id, prompt, model: request.model, outputDir, resume_from: 'accepted' });
+        }
 
         // ② 真实生成（后端可能是画布节点，也可能是异步任务——服务层不关心）
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'provider_started', { kind: 'image', shot_id: shot.shot_id, prompt, model: request.model, outputDir, reference_files: referenceFiles, ratio: request.ratio ?? null, quality: request.quality ?? null, settings: request.settings ?? null, resume_from: 'provider_call' });
+        }
         providerStarted = true;
         /*
           这一镜截过构图蓝图的话，把它作为**参考图**交给后端：
@@ -1002,6 +1022,9 @@ export class GenerationService {
           /* 其余参数（音色、语速、时长…）原样透传；键是后端字段名 */
           ...(request.settings === undefined ? {} : { settings: request.settings }),
         });
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'provider_finished', { kind: 'image', shot_id: shot.shot_id, files: media.files, task_ref: media.task_ref, resume_from: 'publish_artifact' });
+        }
 
         // ③ 按内容哈希入库
         const file = media.files[0];
@@ -1072,6 +1095,9 @@ export class GenerationService {
           },
         });
         revision = settled.project_revision ?? revision + 1;
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'completed', { kind: 'image', shot_id: shot.shot_id, resume_from: null });
+        }
 
         generated.push({
           shot_id: shot.shot_id,
@@ -1106,6 +1132,9 @@ export class GenerationService {
         const code = (error as { code?: string }).code;
         if (code === 'G1_REQUIRED' || code === 'SHOT_FIELDS_REQUIRED') throw error;
 
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'failed', { kind: 'image', shot_id: shot.shot_id, error: String(error), provider_started: providerStarted, resume_from: providerStarted ? 'provider_call' : 'accepted' });
+        }
         const failure = describeFailure(error);
         failures.push({ shot_id: shot.shot_id, reason: actionableFailureMessage(failure), kind: failure.kind });
         // 意图已登记就必须结清，否则那笔预留会永久占着预算
@@ -1373,8 +1402,14 @@ export class GenerationService {
         });
         intentId = (admitted.payload as { intent_id: string }).intent_id;
         revision = admitted.project_revision ?? revision + 1;
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'accepted', { kind: 'video', shot_id: shot.shot_id, model: request.model, duration_seconds: shot.duration_seconds, outputDir, resume_from: 'accepted' });
+        }
 
         // ② 真实生成（首帧给绝对路径，怎么送由后端决定）
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'provider_started', { kind: 'video', shot_id: shot.shot_id, image_file: shot.image_path_relative, prompt: shot.prompt ?? null, model: request.model, duration_seconds: shot.duration_seconds, outputDir, ratio: request.ratio ?? null, resolution: request.resolution ?? null, settings: request.settings ?? null, resume_from: 'provider_call' });
+        }
         providerStarted = true;
         const media = await this.backend.generateVideoFromImage({
           imageFile: join(request.workspaceDir, shot.image_path_relative),
@@ -1387,6 +1422,9 @@ export class GenerationService {
           label: shot.shot_id,
           ...(request.settings === undefined ? {} : { settings: request.settings }),
         });
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'provider_finished', { kind: 'video', shot_id: shot.shot_id, files: media.files, task_ref: media.task_ref, resume_from: 'publish_artifact' });
+        }
 
         // ③ 按内容哈希入库
         const file = media.files[0];
@@ -1431,6 +1469,9 @@ export class GenerationService {
           },
         });
         revision = settled.project_revision ?? revision + 1;
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'completed', { kind: 'video', shot_id: shot.shot_id, resume_from: null });
+        }
 
         generated.push({
           shot_id: shot.shot_id,
@@ -1449,6 +1490,9 @@ export class GenerationService {
         const code = (error as { code?: string }).code;
         if (code === 'G2_REQUIRED' || code === 'FIRST_FRAME_REQUIRED' || code === 'FIRST_FRAME_SUPERSEDED') throw error;
 
+        if (intentId !== null) {
+          this.recordCheckpoint(request.projectId, intentId, 'failed', { kind: 'video', shot_id: shot.shot_id, error: String(error), provider_started: providerStarted, resume_from: providerStarted ? 'provider_call' : 'accepted' });
+        }
         const failure = describeFailure(error);
         failures.push({ shot_id: shot.shot_id, reason: actionableFailureMessage(failure), kind: failure.kind });
         if (intentId !== null) {

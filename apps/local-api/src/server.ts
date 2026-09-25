@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
@@ -117,6 +117,30 @@ export function buildServer(service: ProjectService, kernel?: KernelBinding, opt
   );
 
   app.get('/health', async () => ({ status: 'ok', service: 'qiyin-local-api', protocol: '@1' }));
+  function stripeHeaders(secretKey: string): Record<string, string> {
+    return { authorization: `Bearer ${secretKey}`, 'content-type': 'application/x-www-form-urlencoded' };
+  }
+
+  function activateSubscription(current: AccountState, plan: 'studio' | 'pro', amountCents: number, reason: string): AccountState {
+    const credits = plan === 'pro' ? 100 : 30;
+    const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    return saveAccount({
+      ...current,
+      plan,
+      quota_credits: current.quota_credits + credits,
+      watermark: false,
+      subscription_expires_at: expires,
+      transactions: [{
+        id: randomUUID(),
+        kind: 'subscription-confirmed' as const,
+        credits,
+        amount_cents: amountCents,
+        reason,
+        created_at: new Date().toISOString(),
+      }, ...current.transactions].slice(0, 100),
+    });
+  }
+
   app.get('/api/v1/account', async () => {
     const account = loadAccount();
     return {
@@ -170,17 +194,145 @@ export function buildServer(service: ProjectService, kernel?: KernelBinding, opt
     });
   });
 
+  app.post<{ Body: { plan?: string; amount_cents?: number; confirmation?: boolean; return_url?: string } }>(
+    '/api/v1/account/payment/stripe/checkout',
+    async (request, reply) => {
+      const plan = request.body?.plan;
+      const amountCents = Number(request.body?.amount_cents ?? 0);
+      const confirmation = request.body?.confirmation === true;
+      const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+      if ((plan !== 'studio' && plan !== 'pro') || !Number.isInteger(amountCents) || amountCents <= 0 || !confirmation) {
+        return reply.code(422).send({ error: { code: 'PAYMENT_CONFIRMATION_REQUIRED', message: '创建支付前必须确认方案、金额与 confirmation' } });
+      }
+      if (!secretKey) {
+        return reply.code(501).send({ error: { code: 'STRIPE_NOT_CONFIGURED', message: '未配置 STRIPE_SECRET_KEY，无法创建真实支付会话' } });
+      }
+
+      const returnUrlRaw = request.body?.return_url ?? 'http://127.0.0.1:5173/signup';
+      let returnUrl: URL;
+      try {
+        returnUrl = new URL(returnUrlRaw);
+      } catch {
+        return reply.code(422).send({ error: { code: 'INVALID_RETURN_URL', message: 'return_url 必须是合法 URL' } });
+      }
+      if (returnUrl.protocol !== 'http:' && returnUrl.protocol !== 'https:') {
+        return reply.code(422).send({ error: { code: 'INVALID_RETURN_URL', message: 'return_url 仅允许 http/https' } });
+      }
+      returnUrl.searchParams.set('payment', 'stripe');
+      returnUrl.searchParams.set('session_id', '{CHECKOUT_SESSION_ID}');
+      const cancelUrl = new URL(returnUrlRaw);
+      cancelUrl.searchParams.set('payment', 'cancelled');
+
+      const form = new URLSearchParams();
+      form.set('mode', 'subscription');
+      form.set('success_url', returnUrl.toString().replaceAll('%7B', '{').replaceAll('%7D', '}'));
+      form.set('cancel_url', cancelUrl.toString());
+      form.set('line_items[0][price_data][currency]', 'cny');
+      form.set('line_items[0][price_data][unit_amount]', String(amountCents));
+      form.set('line_items[0][price_data][recurring][interval]', 'month');
+      form.set('line_items[0][price_data][product_data][name]', plan === 'pro' ? '小QTV Pro 订阅' : '小QTV Studio 订阅');
+      form.set('line_items[0][quantity]', '1');
+      form.set('metadata[account_id]', loadAccount().account_id);
+      form.set('metadata[plan]', plan);
+
+      try {
+        const response = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+          method: 'POST',
+          headers: stripeHeaders(secretKey),
+          body: form.toString(),
+        });
+        const payload = await response.json() as { id?: string; url?: string; error?: { message?: string } };
+        if (!response.ok || !payload.url || !payload.id) {
+          return reply.code(response.status).send({ error: { code: 'STRIPE_CHECKOUT_FAILED', message: payload.error?.message ?? 'Stripe 创建支付会话失败' } });
+        }
+        return { session_id: payload.id, url: payload.url, provider: 'stripe' };
+      } catch (error) {
+        return reply.code(502).send({ error: { code: 'STRIPE_UNAVAILABLE', message: error instanceof Error ? error.message : 'Stripe 网络请求失败' } });
+      }
+    },
+  );
+
+  app.post<{ Body: { session_id?: string } }>(
+    '/api/v1/account/payment/stripe/confirm',
+    async (request, reply) => {
+      const sessionId = request.body?.session_id;
+      const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+      if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) {
+        return reply.code(422).send({ error: { code: 'SESSION_ID_REQUIRED', message: '需要合法的 Stripe session_id' } });
+      }
+      if (!secretKey) {
+        return reply.code(501).send({ error: { code: 'STRIPE_NOT_CONFIGURED', message: '未配置 STRIPE_SECRET_KEY' } });
+      }
+
+      try {
+        const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+          headers: { authorization: `Bearer ${secretKey}` },
+        });
+        const session = await response.json() as {
+          status?: string;
+          payment_status?: string;
+          metadata?: { account_id?: string; plan?: string };
+          amount_total?: number;
+          error?: { message?: string };
+        };
+        if (!response.ok) {
+          return reply.code(response.status).send({ error: { code: 'STRIPE_SESSION_FAILED', message: session.error?.message ?? '读取 Stripe 支付会话失败' } });
+        }
+        if (session.status !== 'complete' || !['paid', 'no_payment_required'].includes(session.payment_status ?? '')) {
+          return reply.code(402).send({ error: { code: 'PAYMENT_NOT_COMPLETED', message: 'Stripe 支付尚未完成' } });
+        }
+        const plan = session.metadata?.plan;
+        if (plan !== 'studio' && plan !== 'pro') {
+          return reply.code(422).send({ error: { code: 'INVALID_SUBSCRIPTION_PLAN', message: 'Stripe 会话缺少有效订阅方案' } });
+        }
+        const current = loadAccount();
+        if (session.metadata?.account_id && session.metadata.account_id !== current.account_id) {
+          return reply.code(409).send({ error: { code: 'ACCOUNT_MISMATCH', message: 'Stripe 会话属于其他账号' } });
+        }
+        return activateSubscription(current, plan, Number(session.amount_total ?? 0), 'Stripe 订阅支付确认');
+      } catch (error) {
+        return reply.code(502).send({ error: { code: 'STRIPE_UNAVAILABLE', message: error instanceof Error ? error.message : 'Stripe 网络请求失败' } });
+      }
+    },
+  );
+
   app.post('/api/v1/commands', async (request, reply) => {
+    const command = request.body as {
+      type?: string;
+      project_id?: string;
+      payload?: { target_project_id?: string };
+    };
+    const targetId = command.payload?.target_project_id;
+    const safeId = /^[A-Za-z0-9-]+$/;
+    let copiedWorkspace = false;
+    let copyTarget: string | null = null;
+
     try {
-      return service.execute(request.body);
+      if (command.type === 'project.duplicate' && workspaceRoot && command.project_id && targetId) {
+        if (!safeId.test(command.project_id) || !safeId.test(targetId)) {
+          return reply.code(422).send({ error: { code: 'INVALID_PROJECT_PATH', message: '项目 id 不合法' } });
+        }
+        const sourceDir = resolve(workspaceRoot, command.project_id);
+        copyTarget = resolve(workspaceRoot, targetId);
+        if (existsSync(copyTarget)) {
+          return reply.code(409).send({ error: { code: 'PROJECT_COPY_EXISTS', message: '副本工作目录已存在' } });
+        }
+        if (existsSync(sourceDir)) {
+          cpSync(sourceDir, copyTarget, { recursive: true });
+          copiedWorkspace = true;
+        }
+      }
+
+      return service.execute(command);
     } catch (error) {
+      if (copiedWorkspace && copyTarget) rmSync(copyTarget, { recursive: true, force: true });
       const publicError = toPublicError(error);
       return reply.code(publicError.statusCode).send(publicError.body);
     }
   });
   app.get('/api/v1/projects', async () => service.listProjects());
-  app.get<{ Params: { projectId: string } }>('/api/v1/projects/:projectId', async (request, reply) => {
   app.get('/api/v1/projects/trash', async () => service.listTrashedProjects());
+  app.get<{ Params: { projectId: string } }>('/api/v1/projects/:projectId', async (request, reply) => {
     try { return service.getProject(request.params.projectId); }
     catch (error) { const result = toPublicError(error); return reply.code(result.statusCode).send(result.body); }
   });

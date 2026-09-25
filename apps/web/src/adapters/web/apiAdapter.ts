@@ -227,7 +227,8 @@ export function createApiAdapter(fallbackAdapter: AppPorts = memoryAdapter): App
     })(), () => fallbackAdapter.projects.purge(id, confirmName)),
     duplicate: id => fallback((async () => {
       const source = await getDetail(id);
-      const result = await sendCommand('project.duplicate', { name: `${source.name} · 副本` }, id, source.revision);
+      const targetProjectId = uuid();
+      const result = await sendCommand('project.duplicate', { name: source.name + ' · 副本', target_project_id: targetProjectId }, id, source.revision);
       const detail = await getDetail(result.project_id);
       return projectSummary(detail, detail);
     })(), () => fallbackAdapter.projects.duplicate(id)),
@@ -244,6 +245,10 @@ export function createApiAdapter(fallbackAdapter: AppPorts = memoryAdapter): App
       get: () => apiFetch<Record<string, unknown>>('/account').then(mapAccount),
       consume: (credits, reason) => apiFetch<Record<string, unknown>>('/account/consume', { method: 'POST', body: JSON.stringify({ credits, reason, confirmation: true }) }).then(mapAccount),
       confirmPayment: (plan, amountCents) => apiFetch<Record<string, unknown>>('/account/payment/confirm', { method: 'POST', body: JSON.stringify({ plan, amount_cents: amountCents, confirmation: true }) }).then(mapAccount),
+      startCheckout: async (plan, amountCents, returnUrl) => {
+        const result = await apiFetch<Record<string, unknown>>('/account/payment/stripe/checkout', { method: 'POST', body: JSON.stringify({ plan, amount_cents: amountCents, confirmation: true, return_url: returnUrl }) });
+        return { provider: 'stripe', sessionId: String(result.session_id ?? ''), url: String(result.url ?? returnUrl) };
+      },
     },
     projects,
     shots: {

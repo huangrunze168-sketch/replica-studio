@@ -121,10 +121,14 @@ export function CreateFlow() {
     const decision = evaluateFreeExport(15, quality);
     if (decision.requiresPaymentConfirmation && account && account.plan === 'free') {
       try {
-        const upgraded = await ports.account.confirmPayment('studio', 9900);
-        setAccount(upgraded);
-      } catch {
-        setShotNotice('支付确认服务不可用，导出已取消。');
+        const checkout = await ports.account.startCheckout('studio', 9900, `${window.location.origin}/create`);
+        if (checkout.provider === 'stripe') {
+          window.location.assign(checkout.url);
+          return;
+        }
+        setAccount(await ports.account.get());
+      } catch (error) {
+        setShotNotice(error instanceof Error ? `支付渠道不可用：${error.message}` : '支付渠道不可用，导出已取消。');
         setExportState('idle');
         return;
       }
