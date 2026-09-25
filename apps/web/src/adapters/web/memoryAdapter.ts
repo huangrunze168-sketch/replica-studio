@@ -85,6 +85,7 @@ export const memoryAdapter: AppPorts = {
     consume: (credits, reason) => { accountState = { ...accountState, quotaCredits: Math.max(0, accountState.quotaCredits - credits) }; return delay(accountState); },
     confirmPayment: (plan) => { accountState = { ...accountState, plan, quotaCredits: accountState.quotaCredits + (plan === 'pro' ? 100 : 30), watermark: false, subscriptionExpiresAt: new Date(Date.now() + 30 * 86400000).toISOString() }; return delay(accountState); },
     startCheckout: async (plan, _amountCents, returnUrl) => { await memoryAdapter.account.confirmPayment(plan, _amountCents); return { provider: 'local', sessionId: 'local-checkout', url: returnUrl }; },
+    confirmStripePayment: async () => memoryAdapter.account.confirmPayment('studio', 9900),
   },
   projects: {
     list: () => delay(projects.filter(project => project.status === 'active')),

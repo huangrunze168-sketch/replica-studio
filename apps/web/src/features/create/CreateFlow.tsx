@@ -42,7 +42,35 @@ export function CreateFlow() {
 
 
   useEffect(() => {
-    void ports.account.get().then(setAccount).catch(() => undefined);
+    void (async () => {
+      try {
+        setAccount(await ports.account.get());
+      } catch {
+        return;
+      }
+
+      const params = new URLSearchParams(window.location.search);
+      const payment = params.get('payment');
+      const sessionId = params.get('session_id');
+      if (payment === 'stripe' && sessionId) {
+        try {
+          setAccount(await ports.account.confirmStripePayment(sessionId));
+          setShotNotice('Stripe 支付已确认，订阅额度已到账，可继续完成导出。');
+        } catch (error) {
+          setShotNotice(error instanceof Error ? `Stripe 支付确认失败：${error.message}` : 'Stripe 支付确认失败。');
+        } finally {
+          params.delete('payment');
+          params.delete('session_id');
+          const query = params.toString();
+          window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+        }
+      } else if (payment === 'cancelled') {
+        setShotNotice('Stripe 支付已取消，没有产生扣款。');
+        params.delete('payment');
+        const query = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
+      }
+    })();
   }, []);
 
   const pipelineState = (index: number): 'done' | 'active' | 'pending' => {

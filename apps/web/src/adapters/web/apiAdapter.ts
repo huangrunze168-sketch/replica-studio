@@ -245,6 +245,7 @@ export function createApiAdapter(fallbackAdapter: AppPorts = memoryAdapter): App
       get: () => apiFetch<Record<string, unknown>>('/account').then(mapAccount),
       consume: (credits, reason) => apiFetch<Record<string, unknown>>('/account/consume', { method: 'POST', body: JSON.stringify({ credits, reason, confirmation: true }) }).then(mapAccount),
       confirmPayment: (plan, amountCents) => apiFetch<Record<string, unknown>>('/account/payment/confirm', { method: 'POST', body: JSON.stringify({ plan, amount_cents: amountCents, confirmation: true }) }).then(mapAccount),
+      confirmStripePayment: (sessionId) => apiFetch<Record<string, unknown>>('/account/payment/stripe/confirm', { method: 'POST', body: JSON.stringify({ session_id: sessionId }) }).then(mapAccount),
       startCheckout: async (plan, amountCents, returnUrl) => {
         const result = await apiFetch<Record<string, unknown>>('/account/payment/stripe/checkout', { method: 'POST', body: JSON.stringify({ plan, amount_cents: amountCents, confirmation: true, return_url: returnUrl }) });
         return { provider: 'stripe', sessionId: String(result.session_id ?? ''), url: String(result.url ?? returnUrl) };
