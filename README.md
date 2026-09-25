@@ -12,7 +12,8 @@
 | / | 解释产品价值、展示前后对比、引导注册 |
 | /signup | 轻量注册引导，完成后进入 /create |
 | `/create` | 四步轻量创作流程：上传参考 → 风格分析 → 分镜与低清生成 → 锁定与导出 |
-| `/workbench/:projectId` | 专业项目列表与工作台，登录后进入 |
+| `/workbench` | 项目列表与创建入口，登录后进入 |
+| `/workbench/:projectId` | 专业项目工作台，登录后进入 |
 
 动线顺序：`/` → `/signup` → `/create` → `/workbench`。四条路径不混用同一套视觉语言：`/` 轻盈友好、`/create` 克制强调确认、`/workbench` 深色强调状态与控制。
 

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PROJECT_ID,
   matchRoute,
   projectHref,
   resolveLinkDecision,
@@ -38,9 +37,9 @@ describe('matchRoute', () => {
     expect(matchRoute('/create')).toEqual({ name: 'create' });
   });
 
-  it('/workbench 无项目段时回落默认项目', () => {
-    expect(matchRoute('/workbench')).toEqual({ name: 'workbench', projectId: DEFAULT_PROJECT_ID });
-    expect(matchRoute('/workbench/')).toEqual({ name: 'workbench', projectId: DEFAULT_PROJECT_ID });
+  it('/workbench 无项目段时进入项目列表', () => {
+    expect(matchRoute('/workbench')).toEqual({ name: 'workbenchHome' });
+    expect(matchRoute('/workbench/')).toEqual({ name: 'workbenchHome' });
   });
 
   it('/workbench/:projectId 取出并解码项目 id', () => {

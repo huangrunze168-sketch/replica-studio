@@ -8,6 +8,7 @@ import { Canvas } from '../features/canvas/Canvas';
 import { CreateFlow } from '../features/create/CreateFlow';
 import { LandingPage } from '../features/marketing/LandingPage';
 import { SignupPage } from '../features/marketing/SignupPage';
+import { ProjectListPage } from '../features/workbench/ProjectListPage';
 import { navigate, useRoute } from './router';
 import { hasSession } from '../features/auth/session';
 
@@ -108,7 +109,7 @@ function Placeholder({ section }: { section: string }) { const copy = section ==
 function CommandPalette() { const ui = useUiStore(); if (!ui.commandPaletteOpen) return null; return <div className="modal-backdrop" onClick={() => uiStore.set({ commandPaletteOpen: false })}><div className="modal command-modal" onClick={e => e.stopPropagation()}><input autoFocus placeholder="搜索页面、镜头或命令…" onKeyDown={e => { if (e.key === 'Escape') uiStore.set({ commandPaletteOpen: false }); }} /><div className="command-list">{sections.slice(0,6).map(s => <button key={s[0]} onClick={() => { uiStore.set({ selectedSection: s[0], commandPaletteOpen: false }); }}>{s[2]}　{s[1]}<span>⌘ ↵</span></button>)}</div></div></div>; }
 export function App() {
   const route = useRoute();
-  const needsSession = route.name === 'workbench' && !hasSession();
+  const needsSession = ['workbenchHome', 'workbench'].includes(route.name) && !hasSession();
 
   useEffect(() => {
     if (!needsSession) return;
@@ -119,6 +120,7 @@ export function App() {
   if (route.name === 'landing') return <LandingPage />;
   if (route.name === 'signup' || needsSession) return <SignupPage />;
   if (route.name === 'create') return <CreateFlow />;
+  if (route.name === 'workbenchHome') return <ProjectListPage />;
   return <WorkbenchApp projectId={route.projectId} />;
 }
 

@@ -16,6 +16,7 @@ export type Route =
   | { name: 'landing' }
   | { name: 'signup' }
   | { name: 'create' }
+  | { name: 'workbenchHome' }
   | { name: 'workbench'; projectId: string };
 
 /** `/workbench` 无项目段时的回落项目，沿用原 App.tsx 的默认值。 */
@@ -57,10 +58,9 @@ export function matchRoute(pathname: string): Route {
   } else if (segments[0] === 'create') {
     next = { name: 'create' };
   } else if (segments[0] === 'workbench') {
-    next = {
-      name: 'workbench',
-      projectId: segments[1] ? decodeURIComponent(segments[1]) : DEFAULT_PROJECT_ID,
-    };
+    next = segments[1]
+      ? { name: 'workbench', projectId: decodeURIComponent(segments[1]) }
+      : { name: 'workbenchHome' };
   } else {
     // 未知路径回落落地页，而不是白屏。
     next = { name: 'landing' };
