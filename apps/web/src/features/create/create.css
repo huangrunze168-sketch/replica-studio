@@ -1,0 +1,127 @@
+/* /create —— 消费级四步动线的静态壳。
+   刻意复用 marketing.css 的公共类（.marketing-nav / .overline / .button / .section-shell）
+   和 design-system/tokens.marketing.css 的变量，只补这一面独有的版式。
+   token 已在全局 :root 展开（marketing.css 首行 @import），本文件不重复引入。 */
+
+.create-page { min-height: 100vh; display: flex; flex-direction: column; background: var(--canvas); color: var(--ink-1); font-family: var(--font-sans); }
+/* 自持 token 契约：/create 不在任何暗色 scope 内，本页就地定义整族
+   （值与 tokens.workbench.css 暗色别名层同源，与 marketing :root 同族）。 */
+.create-page {
+  --surface-1: #131419; --surface-2: #191a20; --surface-3: #1f2127; --surface-4: #272a31;
+  --ink-0: #f7f7f7; --ink-1: #c9c9c9; --ink-2: #a0a0a0; --ink-3: #77787d; --ink-4: #4a4a4a;
+  --line: #23252a; --line-strong: #34343a;
+  --brand-300: #a5abf5; --brand-400: #828fff;
+}
+.create-main { flex: 1; padding: 72px 0 96px; }
+
+.create-head { max-width: 720px; }
+.create-head h1 { margin: 0; color: var(--ink-0); font-size: clamp(34px, 4.4vw, 56px); line-height: 1.16; letter-spacing: 0; font-weight: var(--weight-semibold); }
+.create-head h1 em { color: inherit; font-style: normal; }
+.create-lede { max-width: 560px; margin: 22px 0 0; color: var(--ink-2); font-size: 15px; line-height: 1.8; }
+
+.create-rail { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); margin: 56px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.create-step { position: relative; padding: var(--space-5) var(--space-4) 0 0; border-right: 1px solid var(--line); }
+.create-step:not(:first-child) { padding-left: var(--space-4); }
+.create-step:last-child { border-right: 0; }
+.create-step-number { display: block; color: var(--ink-3); font: var(--text-label)/1 var(--font-mono); letter-spacing: .08em; }
+.create-step b { display: block; margin-top: 14px; font-size: var(--text-h2); letter-spacing: 0; }
+.create-step small { display: block; margin-top: 8px; color: var(--ink-2); font-size: var(--text-body-sm); line-height: 1.65; }
+.create-step.is-active .create-step-number { color: var(--brand-300); }
+.create-step.is-active::after { content: ''; position: absolute; top: -1px; left: 0; right: 0; height: 2px; background: var(--brand-300); }
+.create-step button { width: 100%; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.create-step.is-complete .create-step-number { color: var(--color-emerald-500); }
+
+.create-stage { display: grid; grid-template-columns: 1.15fr .85fr; gap: var(--space-6); margin-top: 44px; align-items: start; }
+
+.create-panel { padding: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); }
+.create-dropzone { min-height: 348px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-8); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); text-align: center; }
+.create-dropzone-icon { color: var(--brand-300); font-size: 28px; line-height: 1; }
+.create-dropzone b { font-size: var(--text-h2); font-weight: var(--weight-medium); }
+.create-dropzone small { max-width: 340px; color: var(--ink-2); font-size: var(--text-body-sm); line-height: 1.7; }
+.create-dropzone-tag { margin-top: var(--space-3); padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-full); color: var(--ink-3); background: var(--surface-1); font: var(--weight-medium) var(--text-micro)/1 var(--font-mono); letter-spacing: .06em; }
+.create-dropzone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.create-dropzone:focus-within { outline: 2px solid var(--brand-300); outline-offset: 3px; }
+.create-field { display: block; margin-top: var(--space-6); }.create-field > span { display: block; font-size: var(--text-body-sm); font-weight: var(--weight-medium); }.create-field textarea { width: 100%; margin-top: var(--space-2); resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-md); padding: var(--space-3); color: var(--ink-1); background: var(--surface-2); font: inherit; line-height: 1.7; }.create-field textarea:focus { outline: 2px solid var(--brand-300); outline-offset: 2px; }.create-field small { display: block; margin-top: 5px; color: var(--ink-3); text-align: right; font-size: var(--text-micro); }
+.choice-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3); margin-top: var(--space-5); }.choice-card { position: relative; display: block; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); cursor: pointer; }.choice-card input { position: absolute; opacity: 0; }.choice-card.is-selected { border-color: var(--brand-300); box-shadow: 0 0 0 2px rgba(130, 143, 255, .13); }.choice-preview { display: block; height: 62px; margin-bottom: var(--space-3); border-radius: var(--radius-sm); background: linear-gradient(135deg, #29233b, #c9b9a1 65%, #f2e6db); }.choice-card:nth-child(2) .choice-preview { background: linear-gradient(135deg, #dce8ed, #f7f3ed); }.choice-card:nth-child(3) .choice-preview { background: linear-gradient(135deg, #241d2c, #a66a72); }.choice-card:nth-child(4) .choice-preview { background: linear-gradient(135deg, #e8e2d8, #2d2b2a); }.choice-card b, .choice-card small { display: block; }.choice-card b { font-size: var(--text-body-sm); }.choice-card small { margin-top: 4px; color: var(--ink-3); font-size: var(--text-micro); }.toggle-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--line); cursor: pointer; }.toggle-row span, .toggle-row b, .toggle-row small { display: block; }.toggle-row small { margin-top: 5px; color: var(--ink-3); font-size: var(--text-micro); }.toggle-row input { position: absolute; opacity: 0; }.toggle-row i { position: relative; width: 42px; height: 24px; flex: 0 0 auto; border-radius: var(--radius-full); background: var(--surface-4); transition: background var(--dur-fast) var(--ease-standard); }.toggle-row i::after { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; border-radius: 50%; background: white; box-shadow: 0 2px 5px #12111020; transition: transform var(--dur-fast) var(--ease-standard); }.toggle-row input:checked + i { background: var(--brand-300); }.toggle-row input:checked + i::after { transform: translateX(18px); }
+.subject-placeholder, .export-preview { min-height: 150px; display: grid; place-items: center; margin-top: var(--space-5); border: 1px dashed var(--line-strong); border-radius: var(--radius-md); color: var(--ink-3); background: var(--surface-2); font-size: var(--text-label); text-align: center; }.storyboard-shell { padding: var(--space-6); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); }.storyboard-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); }.storyboard-toolbar h2 { margin: 0; font-size: var(--text-h2); }.generation-status { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-5); padding: var(--space-3); border: 1px solid var(--border-brand); border-radius: var(--radius-md); color: var(--brand-300); background: var(--color-brand-50); }.generation-status b, .generation-status small { display: block; }.generation-status small { margin-top: 4px; color: var(--ink-2); font-size: var(--text-micro); }.ui-loader { width: 18px; height: 18px; border: 2px solid rgba(130, 143, 255, .2); border-top-color: var(--brand-300); border-radius: 50%; animation: create-spin 800ms linear infinite; }.storyboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); margin-top: var(--space-5); }.shot-card { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }.shot-card.is-locked { border-color: var(--brand-300); box-shadow: 0 0 0 2px rgba(130, 143, 255, .11); }.shot-media { position: relative; min-height: 130px; display: grid; place-items: center; padding: var(--space-3); color: var(--ink-3); background: linear-gradient(135deg, #252135, #d7bca5); font-size: var(--text-micro); text-align: center; }.shot-card:nth-child(2) .shot-media { background: linear-gradient(135deg, #dce8ed, #7c91ad); }.shot-card:nth-child(3) .shot-media { background: linear-gradient(135deg, #302532, #b27775); }.shot-card:nth-child(4) .shot-media { background: linear-gradient(135deg, #2c2c30, #d6c7b0); }.shot-media b { position: absolute; right: 8px; bottom: 7px; color: white; font: var(--text-micro)/1 var(--font-mono); }.shot-card-copy { padding: var(--space-3); }.shot-card-copy > span { color: var(--brand-300); font: var(--text-micro)/1 var(--font-mono); }.shot-card-copy h3 { margin: 9px 0 0; font-size: var(--text-body-sm); }.shot-card-copy p { min-height: 44px; margin: 7px 0 0; color: var(--ink-2); font-size: var(--text-micro); line-height: 1.6; }.shot-card-copy button { padding: 7px 0 0; color: var(--brand-300); background: transparent; font-size: var(--text-micro); cursor: pointer; }.export-options { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-top: var(--space-5); }.export-options fieldset { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; border: 0; }.export-options legend { width: 100%; margin-bottom: var(--space-2); color: var(--ink-3); font-size: var(--text-label); }.export-options label { cursor: pointer; }.export-options input { position: absolute; opacity: 0; }.export-options input + span { display: inline-block; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-full); color: var(--ink-2); background: var(--surface-2); font-size: var(--text-micro); }.export-options input:checked + span { color: var(--fg-on-emphasis); border-color: var(--ink-1); background: var(--ink-1); }.summary-list { display: grid; gap: var(--space-3); margin: var(--space-5) 0 0; padding: 0; list-style: none; }.summary-list li { display: flex; justify-content: space-between; gap: var(--space-3); padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: var(--text-body-sm); }.summary-list b { color: var(--ink-1); font-weight: var(--weight-medium); }.export-button { width: 100%; justify-content: center; margin-top: var(--space-5); }
+@keyframes create-spin { to { transform: rotate(360deg); } }
+
+.create-side { display: flex; flex-direction: column; gap: var(--space-4); }
+.create-analysis { padding: var(--space-6); border: 1px solid var(--border-brand); border-radius: var(--radius-lg); background: var(--surface-1); }
+.create-analysis h2 { margin: 0; font-size: var(--text-h2); letter-spacing: 0; }
+.create-analysis-note { margin: 8px 0 0; color: var(--ink-3); font-size: var(--text-label); }
+.create-analysis ul { display: flex; flex-direction: column; gap: var(--space-4); margin: 22px 0 0; padding: 0; list-style: none; }
+.create-analysis-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.create-analysis-row span { font-size: var(--text-body-sm); font-weight: var(--weight-medium); }
+.create-analysis-row small { color: var(--ink-2); font: var(--text-label)/1 var(--font-mono); }
+.create-analysis-bar { height: 4px; margin-top: 8px; border-radius: var(--radius-full); background: var(--surface-3); overflow: hidden; }
+.create-analysis-bar span { display: block; height: 100%; border-radius: var(--radius-full); background: linear-gradient(90deg, var(--color-brand-400), var(--color-brand-600)); }
+
+.create-gate { padding: var(--space-5); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); }
+.create-gate b { display: block; color: var(--brand-300); font: var(--weight-medium) var(--text-label)/1 var(--font-mono); letter-spacing: var(--tracking-caps); text-transform: uppercase; }
+.create-gate p { margin: 12px 0 0; color: var(--ink-2); font-size: var(--text-body-sm); line-height: 1.7; }
+
+.create-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: 40px; padding-top: var(--space-6); border-top: 1px solid var(--line); }
+.create-actions .button[disabled] { opacity: .48; cursor: not-allowed; transform: none; box-shadow: none; }
+.create-actions-note { flex: 1 1 280px; margin: 0; color: var(--ink-3); font-size: var(--text-label); line-height: 1.6; }
+
+@media (max-width: 1000px) { .create-stage { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .storyboard-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 767px) {
+  .create-main { padding: 52px 0 72px; }
+  /* 移动端步进器压缩为 2×2：四步说明占一整屏会推迟真正的创作内容。 */
+  .create-rail { grid-template-columns: repeat(2, 1fr); gap: var(--space-2) var(--space-4); margin-top: 32px; }
+  .create-step, .create-step:not(:first-child) { padding: var(--space-3) 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .create-step b { font-size: var(--text-body); }
+  .create-step small { display: none; }
+  .create-step.is-active::after { display: none; }
+  .create-step.is-active b { color: var(--brand-300); }
+  .create-dropzone { min-height: 240px; }
+  .choice-grid, .storyboard-grid, .export-options { grid-template-columns: 1fr; }
+  .storyboard-toolbar { align-items: flex-start; flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) { .create-analysis-bar span, .ui-loader, .toggle-row i, .toggle-row i::after { transition: none; animation: none; } }
+
+/* 生成过程持续可见：分析参考 → 生成分镜 → 生成镜头 → 合成视频。 */
+.creation-pipeline { margin-block: var(--space-6); padding: var(--space-5); border: var(--border-width-hair) solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); }
+.pipeline-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
+.pipeline-title .overline { margin: 0; }
+.pipeline-title b { color: var(--ink-1); font-size: var(--text-label); }
+.pipeline-track { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); margin-top: var(--space-4); }
+.pipeline-stage { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 2px var(--space-2); align-items: center; padding: var(--space-3); border: var(--border-width-hair) solid var(--line); border-radius: var(--radius-md); background: var(--surface-1); }
+.pipeline-stage:not(:last-child)::after { content: '→'; position: absolute; inset-inline-end: -14px; color: var(--ink-4); }
+.pipeline-stage > span { grid-row: span 2; display: grid; place-items: center; width: var(--space-6); min-height: var(--space-6); border-radius: var(--radius-full); color: var(--ink-3); background: var(--surface-3); font: var(--text-micro)/1 var(--font-mono); }
+.pipeline-stage b { color: var(--ink-1); font-size: var(--text-label); }
+.pipeline-stage small { color: var(--ink-4); font-size: var(--text-micro); }
+.pipeline-stage.is-active { border-color: var(--brand-400); background: var(--brand-50); }
+.pipeline-stage.is-active > span { color: var(--fg-on-emphasis); background: var(--brand-400); }
+.pipeline-stage.is-active b, .pipeline-stage.is-done b { color: var(--ink-0); }
+.pipeline-stage.is-done > span { color: var(--fg-on-emphasis); background: var(--color-green-500, #22c55e); }
+
+.shot-notice { margin-block-start: var(--space-3); padding: var(--space-3) var(--space-4); border: var(--border-width-hair) solid rgba(34, 197, 94, .35); border-radius: var(--radius-md); color: #4ade80; background: rgba(34, 197, 94, .08); font-size: var(--text-label); }
+.shot-card-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.shot-card-title > span { color: var(--brand-300); font: var(--text-micro)/1 var(--font-mono); }
+.shot-card-title i { color: #4ade80; font-style: normal; font-size: var(--text-micro); }
+.shot-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-block-start: var(--space-3); }
+.shot-actions button { min-height: var(--control-h); padding-inline: var(--space-3); border: var(--border-width-hair) solid var(--line-strong); border-radius: var(--radius-md); color: var(--ink-1); background: var(--surface-1); font-size: var(--text-micro); }
+.shot-actions button:hover { border-color: var(--brand-400); color: var(--brand-300); }
+.shot-card.is-retaking { border-color: var(--brand-400); box-shadow: 0 0 0 2px var(--brand-50); }
+.shot-card.is-retaking .shot-media { animation: source-scan 1s ease-in-out infinite; }
+
+.modal-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-block-start: var(--space-5); }
+.shot-confirm-modal > p:last-of-type, .export-confirm-modal > p:last-of-type { color: var(--ink-2); line-height: 1.8; }
+.export-confirm-modal b { color: var(--ink-0); }
+.export-success { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-block-start: var(--space-4); padding: var(--space-4); border: var(--border-width-hair) solid rgba(34, 197, 94, .35); border-radius: var(--radius-md); color: #4ade80; background: rgba(34, 197, 94, .08); }
+.export-success span { font-size: var(--text-micro); }
+@media (max-width: 767px) { .pipeline-title { align-items: flex-start; flex-direction: column; }.pipeline-track { grid-template-columns: 1fr 1fr; }.pipeline-stage:not(:last-child)::after { display: none; }.shot-actions button { flex: 1; }.modal-actions { flex-direction: column-reverse; }.modal-actions .button { justify-content: center; }.export-success { align-items: flex-start; flex-direction: column; } }
+.free-quota { display:block; margin-top:var(--space-2); color:var(--ink-3); font-size:var(--text-micro); }.shot-actions button:disabled { opacity:.5; cursor:not-allowed; }
+.account-status { display:flex; flex-wrap:wrap; gap:var(--space-3); margin-top:var(--space-4); padding:var(--space-3) var(--space-4); border:var(--border-width-hair) solid var(--line); border-radius:var(--radius-md); color:var(--ink-2); background:var(--surface-2); font-size:var(--text-micro); }.account-status span:not(:first-child) { padding-left:var(--space-3); border-left:1px solid var(--line); }
+
+/* ── 暗色入阶补充（级联末尾覆盖）──────────────────────────
+   toggle 选中态兜底 + Linear 微交互：hover = 边框提亮 + 表面抬升。 */
+.toggle-row input:checked + i { background: var(--brand-400); }
+.toggle-row input:checked + i::after { transform: translateX(18px); background: #ffffff; }
+.toggle-row input:focus-visible + i { outline: 2px solid var(--brand-400); outline-offset: 2px; }
+.choice-card:hover { border-color: var(--line-strong); background: var(--surface-3); }
+.shot-card:hover { border-color: var(--line-strong); }
+.create-dropzone:hover { border-color: var(--brand-400); }

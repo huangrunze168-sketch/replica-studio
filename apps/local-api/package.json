@@ -1,0 +1,12 @@
+{
+  "name": "@qiyin/local-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@qiyin/contracts": "workspace:*",
+    "@qiyin/domain": "workspace:*",
+    "@qiyin/frontkernel-adapter": "workspace:*",
+    "@qiyin/kernel-service": "workspace:*"
+  }
+}
