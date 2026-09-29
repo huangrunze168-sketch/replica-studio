@@ -22,8 +22,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   AUTH_METHOD_LABELS, CredentialStore, CredentialStoreCorruptError, ProviderAuthError,
   asOAuth2, asSms, buildAuthorizationUrl, createHttpSmsGateway, createMemoryVault, createPkcePair,
-  isProviderAuthError, purgeCredentialFiles, resolveAuth, startLoopbackReceiver, summarizeAuthHeaders,
-  type AuthDeps, type CredentialRecord,
+  isFetchSafeLoopbackPort, isProviderAuthError, purgeCredentialFiles, resolveAuth, startLoopbackReceiver, summarizeAuthHeaders,
+  type AuthDeps,
 } from '@qiyin/provider-auth';
 
 const roots: string[] = [];
@@ -68,10 +68,15 @@ async function startServer(
       })();
     });
   });
+  let address = server.address();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', () => { resolve(); }); });
+    address = server.address();
+    if (address !== null && typeof address !== 'string' && isFetchSafeLoopbackPort(address.port)) break;
+    await new Promise<void>((resolve) => { server.close(() => { resolve(); }); });
+  }
+  if (address === null || typeof address === 'string' || !isFetchSafeLoopbackPort(address.port)) throw new Error('服务没拿到浏览器可访问的端口');
   servers.push(server);
-  await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', () => { resolve(); }); });
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('服务没起来');
   return { origin: `http://127.0.0.1:${address.port}` };
 }
 

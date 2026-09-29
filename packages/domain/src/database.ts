@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -19,8 +20,17 @@ export function openDatabase(path: string): DatabaseSync {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;');
   db.exec(`
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1,
+      deleted_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
+      workspace_id TEXT REFERENCES workspaces(id),
       name TEXT NOT NULL,
       revision INTEGER NOT NULL,
       state TEXT NOT NULL,
@@ -65,6 +75,18 @@ export function openDatabase(path: string): DatabaseSync {
       fields_revision INTEGER NOT NULL,
       breakdown_revision INTEGER NOT NULL,
       shots_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS canvas_documents (
+      project_id TEXT PRIMARY KEY REFERENCES projects(id),
+      document_revision INTEGER NOT NULL,
+      document_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS timeline_documents (
+      project_id TEXT PRIMARY KEY REFERENCES projects(id),
+      document_revision INTEGER NOT NULL,
+      document_json TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS gate_decisions (
@@ -349,6 +371,23 @@ export function openDatabase(path: string): DatabaseSync {
    * SQLite 的 ALTER TABLE ADD COLUMN 重复执行会直接报错，
    * 靠捕获异常来当"已存在"用，会把真正的失败也一起吞掉。
    */
+  if (!hasColumn(db, 'projects', 'workspace_id')) {
+    db.exec('ALTER TABLE projects ADD COLUMN workspace_id TEXT REFERENCES workspaces(id)');
+  }
+  /*
+    LibTV 的 space/workspace 是容器，project 是容器中的画布。老库只有 projects，
+    因而迁移时为每个旧 project 建一个独立 workspace；不能把两种 id 继续当成同一个值。
+  */
+  const orphanProjects = db.prepare('SELECT id, name, created_at, updated_at FROM projects WHERE workspace_id IS NULL').all() as unknown as Array<{ id: string; name: string; created_at: string; updated_at: string }>;
+  const insertWorkspace = db.prepare('INSERT INTO workspaces(id, name, revision, created_at, updated_at) VALUES (?, ?, 1, ?, ?)');
+  const bindWorkspace = db.prepare('UPDATE projects SET workspace_id=? WHERE id=?');
+  for (const project of orphanProjects) {
+    const workspaceId = randomUUID();
+    insertWorkspace.run(workspaceId, project.name, project.created_at, project.updated_at);
+    bindWorkspace.run(workspaceId, project.id);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS projects_workspace_idx ON projects(workspace_id, created_at DESC)');
+
   if (!hasColumn(db, 'projects', 'deleted_at')) {
     db.exec('ALTER TABLE projects ADD COLUMN deleted_at TEXT');
   }

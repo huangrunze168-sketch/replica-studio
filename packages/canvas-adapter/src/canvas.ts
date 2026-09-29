@@ -15,7 +15,8 @@ import type { CanvasAdapter } from './adapter.js';
 
    实测确认的两个返回体（不是猜的）：
 
-                                   并写出 { "projectUuid": "…" }
+     · `project create` 返回 `{ projectMeta: { uuid: "…" } }`；
+     · `project use` 返回 `{ projectUuid: "…" }`，并写出 `.libtv/project.json`。
    ============================================================ */
 
 export interface CanvasBinding {
@@ -27,16 +28,21 @@ export interface CanvasBinding {
   dir: string;
 }
 
-/**/
-const BINDING_DIR = '.canvas';
+/** LibTV CLI 1.1.3 写入的官方目录；`.canvas` 只用于兼容早期开发版。 */
+const BINDING_DIR = '.libtv';
+const LEGACY_BINDING_DIR = '.canvas';
 const BINDING_FILE = 'project.json';
 
 export function canvasBindingPath(dir: string): string {
   return join(dir, BINDING_DIR, BINDING_FILE);
 }
 
+function canvasBindingCandidates(dir: string): string[] {
+  return [canvasBindingPath(dir), join(dir, LEGACY_BINDING_DIR, BINDING_FILE)];
+}
+
 export function hasCanvasBinding(dir: string): boolean {
-  return existsSync(canvasBindingPath(dir));
+  return readCanvasBinding(dir) !== null;
 }
 
 /**
@@ -46,19 +52,21 @@ export function hasCanvasBinding(dir: string): boolean {
  * 调用方据此判断「还没绑」，而不是把一个半截的绑定当成可用的。
  */
 export function readCanvasBinding(dir: string): CanvasBinding | null {
-  const file = canvasBindingPath(dir);
-  if (!existsSync(file)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { projectUuid?: unknown; workspaceId?: unknown };
-    if (typeof parsed.projectUuid !== 'string' || parsed.projectUuid.length === 0) return null;
-    return {
-      canvasUuid: parsed.projectUuid,
-      workspaceId: typeof parsed.workspaceId === 'number' ? parsed.workspaceId : null,
-      dir,
-    };
-  } catch {
-    return null;
+  for (const file of canvasBindingCandidates(dir)) {
+    if (!existsSync(file)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { projectUuid?: unknown; workspaceId?: unknown };
+      if (typeof parsed.projectUuid !== 'string' || parsed.projectUuid.length === 0) continue;
+      return {
+        canvasUuid: parsed.projectUuid,
+        workspaceId: typeof parsed.workspaceId === 'number' ? parsed.workspaceId : null,
+        dir,
+      };
+    } catch {
+      // 官方绑定损坏时继续尝试旧目录；两边都不可用才返回 null。
+    }
   }
+  return null;
 }
 
 export interface EnsureCanvasOptions {

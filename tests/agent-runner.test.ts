@@ -3,6 +3,8 @@ import {
   isProtocolLine,
   parseClaudeLine,
   parseCodexLine,
+  parseDshLine,
+  formatAgentFailure,
   type AgentEventKind,
 } from '../apps/local-api/src/agent/agent-runner.js';
 
@@ -48,6 +50,33 @@ function collect(): {
   };
 }
 
+describe('DSH headless 事件解析', () => {
+  it('将思考、正文与工具生命周期映射为小QTV 事件，并忽略重复 final', () => {
+    const { events, emit } = collect();
+    const lines = [
+      { type: 'session', sessionId: 'session-1', cwd: 'C:/workspace' },
+      { type: 'thinking', text: '先分析创作要求' },
+      { type: 'tool_call', callId: 'call-1', tool: 'pwsh', input: { command: 'Get-ChildItem', description: '读取项目文件' } },
+      { type: 'tool_result', callId: 'call-1', status: 'completed', result: 'ok' },
+      { type: 'text', text: '分析完成' },
+      { type: 'final', text: '分析完成' },
+    ];
+    for (const line of lines) expect(parseDshLine(JSON.stringify(line), emit)).toBe(true);
+    expect(events).toEqual([
+      { kind: 'reasoning', text: '先分析创作要求' },
+      { kind: 'tool', text: '读取项目文件', itemId: 'call-1', phase: 'start', toolKind: 'pwsh' },
+      { kind: 'tool', text: '工具调用完成', itemId: 'call-1', phase: 'done', toolKind: 'dsh_tool', failed: false },
+      { kind: 'message', text: '分析完成' },
+    ]);
+  });
+
+  it('将 DSH error 归一为可操作错误', () => {
+    const { events, emit } = collect();
+    parseDshLine(JSON.stringify({ type: 'error', error: { message: 'authentication_failed' } }), emit);
+    expect(events).toEqual([{ kind: 'error', text: '模型服务未授权，请检查 Agent 登录状态或模型服务凭据。' }]);
+  });
+});
+
 describe('codex 事件解析', () => {
   it('整条 JSON 里带着沙箱报错文本时，仍然算协议行（不能当噪声丢掉）', () => {
     /*
@@ -84,23 +113,30 @@ describe('codex 事件解析', () => {
     expect(events).toEqual([{ kind: 'message', text: '就绪' }]);
   });
 
-  it('item 里的 error 画成错误，不吞掉', () => {
+  it('真实八行失败记录中的警告不是助手消息，模型 400 归一为一条可操作提示', () => {
     const { events, emit } = collect();
-    parseCodexLine(
-      JSON.stringify({ type: 'item.completed', item: { id: 'item_0', type: 'error', message: 'Exceeded skills context budget of 2%.' } }),
-      emit,
-    );
-    expect(events).toEqual([{ kind: 'error', text: 'Exceeded skills context budget of 2%.' }]);
+    const modelError = JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: "The 'gpt-5.6-sol' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again." } });
+    const stdout = [
+      { type: 'thread.started', thread_id: 'sample-thread' },
+      { type: 'item.completed', item: { id: 'item_0', type: 'error', message: 'Model metadata for `gpt-5.6-sol` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.' } },
+      { type: 'turn.started' },
+      { type: 'item.completed', item: { id: 'item_1', type: 'error', message: 'Exceeded skills context budget of 2%. All skill descriptions were removed.' } },
+      { type: 'error', message: modelError },
+      { type: 'turn.failed', error: { message: modelError } },
+    ];
+    // 实际 NDJSON 的另外两行是 stderr 启动提示／缓存报错，不属于 JSON 协议。
+    for (const item of stdout) parseCodexLine(JSON.stringify(item), emit);
+    expect(events.filter(event => event.kind === 'message' || event.kind === 'note')).toEqual([]);
+    expect(events.filter(event => event.kind === 'error')).toHaveLength(2);
+    expect(events[0]?.text).toContain('Codex CLI 版本过旧');
+    expect(events[1]?.text).toBe(events[0]?.text);
+    expect(formatAgentFailure(modelError)).not.toContain('invalid_request_error');
   });
 
-  it('turn.completed 带出用量并结束本轮', () => {
+  it('turn.completed 不在进程退出前宣告完成', () => {
     const { events, emit } = collect();
-    parseCodexLine(
-      JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 41641, output_tokens: 3 } }),
-      emit,
-    );
-    expect(events[0]?.kind).toBe('done');
-    expect(events[0]?.usage).toEqual({ input_tokens: 41641, output_tokens: 3 });
+    parseCodexLine(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 41641, output_tokens: 3 } }), emit);
+    expect(events).toEqual([]);
   });
 
   it('同一条 item 的 started/updated 不重复画', () => {

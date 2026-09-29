@@ -42,6 +42,44 @@ describe('本地 API·媒体上传', () => {
     const file = resolve(root, projectId, body.relative_path);
     expect(existsSync(file)).toBe(true);
     expect(readFileSync(file)).toEqual(png);
+    const preview = await app.inject({ method: 'GET', url: `/api/v1/projects/${projectId}/assets/${encodeURIComponent(body.artifact_id)}` });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.headers['content-type']).toBe('image/png');
+    expect(preview.rawPayload).toEqual(png);
+    const range = await app.inject({ method: 'GET', url: `/api/v1/projects/${projectId}/assets/${encodeURIComponent(body.artifact_id)}`, headers: { range: 'bytes=0-7' } });
+    expect(range.statusCode).toBe(206);
+    expect(range.rawPayload).toEqual(png.subarray(0, 8));
+    const otherProjectId = createProject('其他项目');
+    expect((await app.inject({ method: 'GET', url: `/api/v1/projects/${otherProjectId}/assets/${encodeURIComponent(body.artifact_id)}` })).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('接受 LibTV 附件入口声明的 PDF、纯文本与 Markdown 文档', async () => {
+    const { createProject, app } = setup(4096); const projectId = createProject('文档附件');
+    const fixtures = [
+      { name: 'brief.pdf', type: 'application/pdf', bytes: Buffer.from('%PDF-1.7\n1 0 obj\n<<>>\nendobj') },
+      { name: 'notes.txt', type: 'text/plain', bytes: Buffer.from('人物：剑客\n场景：雨夜', 'utf8') },
+      { name: 'story.md', type: 'text/markdown', bytes: Buffer.from('# 分镜脚本\n\n- 雨夜客栈', 'utf8') },
+      { name: 'script.doc', type: 'application/msword', bytes: Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.from('word document')]) },
+      { name: 'script.docx', type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', bytes: Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('[Content_Types].xml word/document.xml')]) },
+    ];
+    for (const fixture of fixtures) {
+      const response = await app.inject({ method: 'POST', url: `/api/v1/projects/${projectId}/uploads`, headers: { 'content-type': fixture.type, 'x-file-name': fixture.name }, payload: fixture.bytes });
+      expect(response.statusCode, fixture.name).toBe(201);
+      expect((response.json() as { media_type: string }).media_type).toBe(fixture.type);
+    }
+    await app.close();
+  });
+
+  it('素材评级持久化，删除同时清理领域记录与磁盘文件', async () => {
+    const { root, service, createProject, app } = setup(); const projectId = createProject('素材管理');
+    const upload = await app.inject({ method: 'POST', url: `/api/v1/projects/${projectId}/uploads`, headers: { 'content-type': 'image/png', 'x-file-name': 'rated.png' }, payload: png }); const asset = upload.json() as { artifact_id: string; relative_path: string };
+    let project = service.getProject(projectId) as { revision: number };
+    const rated = await app.inject({ method: 'POST', url: '/api/v1/commands', payload: { command_id: randomUUID(), actor: 'user:test', type: 'asset.rate', project_id: projectId, expected_revision: project.revision, payload: { artifact_id: asset.artifact_id, stars: 4 } } });
+    expect(rated.statusCode).toBe(200); expect((service.getProject(projectId) as { asset_ratings: Array<{ artifact_id: string; stars: number }> }).asset_ratings).toContainEqual(expect.objectContaining({ artifact_id: asset.artifact_id, stars: 4 }));
+    project = service.getProject(projectId) as { revision: number };
+    const removed = await app.inject({ method: 'DELETE', url: `/api/v1/projects/${projectId}/assets/${encodeURIComponent(asset.artifact_id)}`, payload: { expected_revision: project.revision } });
+    expect(removed.statusCode).toBe(204); expect(existsSync(resolve(root, projectId, asset.relative_path))).toBe(false); expect((service.listArtifacts() as Array<{ artifact_id: string }>).some(item => item.artifact_id === asset.artifact_id)).toBe(false);
     await app.close();
   });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiAdapter } from '../adapters';
+import { apiAdapter } from '../adapters/web/apiAdapter';
 import type { Asset, GenerationJob, ProjectSummary, ReferenceSource, Shot } from '../ports';
 
 export const ports = apiAdapter;
@@ -16,11 +16,12 @@ export function useAppData(projectId: string) {
     return undefined;
   });
   const refreshSources = () => ports.source.list(projectId).then(setSources);
+  const refreshAssets = () => ports.media.listAssets(projectId).then(setAssets);
 
   useEffect(() => {
     let active = true;
     void Promise.all([
-      ports.projects.get(projectId),
+      ports.canvases.get(projectId),
       ports.shots.list(projectId),
       ports.media.listAssets(projectId),
       ports.source.list(projectId),
@@ -48,5 +49,5 @@ export function useAppData(projectId: string) {
     };
   }, [projectId]);
 
-  return { project, shots, assets, sources, jobs, refreshJobs, refreshSources };
+  return { project, shots, assets, sources, jobs, refreshJobs, refreshSources, refreshAssets };
 }

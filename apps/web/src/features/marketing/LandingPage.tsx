@@ -4,9 +4,15 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 import { navigate } from '../../app/router';
 import { usePrefersReducedMotion } from '../../app/usePrefersReducedMotion';
-import { AgentLensCanvas } from './AgentLensCanvas';
+import { LazyAgentLensCanvas } from './LazyAgentLensCanvas';
 import { AGENT_MODES, LUCIDE_PLUS_PATHS, LUCIDE_SPARKLE_PATH } from './agentConsole';
 import { ProjectRail } from '../workbench/ProjectRail';
+import { readSession } from '../auth/session';
+import { requiresAgentConfirmation } from '../../domain/agentActions';
+import { HeroAgentThread } from '../agent/HeroAgentThread';
+import { useHeroAgentChat } from '../agent/useHeroAgentChat';
+import { openAgentCanvas } from '../agent/agentNavigation';
+import '../../marketing.css';
 
 gsap.registerPlugin(useGSAP, ScrollTrigger);
 
@@ -19,9 +25,6 @@ gsap.registerPlugin(useGSAP, ScrollTrigger);
    交互动效：逐字符 stagger 入场、IO 触发 reveal、跑马灯、
    tab 切换、滑杆、hover 抬升。内容为小QTV。
    ============================================================ */
-
-/** Agent 会话消息：steps 是 Agent 给出的、可一键填入的下一步。 */
-type AgentMessage = { id: string; role: 'user' | 'agent'; text: string; steps?: string[] };
 
 const capabilities = [
   ['参考片分析', '提取镜头节奏、景别结构、构图与情绪曲线，把参考变成可理解的制作地图。'],
@@ -84,9 +87,20 @@ export function LandingPage() {
   const [yearly, setYearly] = useState(false);
   const [units, setUnits] = useState(1000);
   /** Agent 对话：对标站 首页——中间是会话流，空态才显示「A new era」。 */
-  const [agentPrompt, setAgentPrompt] = useState('');
+  const [agentPrompt, setAgentPrompt] = useState(() => window.sessionStorage.getItem('qiyin.hero.draft') ?? '');
   const [agentModel, setAgentModel] = useState('auto-medium');
-  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [confirmation, setConfirmation] = useState<string | null>(null);
+  const heroAgent = useHeroAgentChat();
+  const [canvasNavigationError, setCanvasNavigationError] = useState('');
+  const enterCanvas = async () => {
+    try { if (!await openAgentCanvas()) setCanvasNavigationError('消息已提交，但暂未找到对应画布；对话保留在此处。'); }
+    catch { setCanvasNavigationError('消息已提交，但画布暂时无法打开；对话保留在此处。'); }
+  };
+  const hasAgentDialogue = heroAgent.messages.some(message => message.role === 'user' || message.role === 'agent' || message.role === 'plan');
+  useEffect(() => {
+    if (agentPrompt) window.sessionStorage.setItem('qiyin.hero.draft', agentPrompt);
+    else window.sessionStorage.removeItem('qiyin.hero.draft');
+  }, [agentPrompt]);
 
   /** 首屏入场（对标 hero 组件里的 `b=z(()=>l(d)||xt.current)` / `data-animate=!xt.current`）。
       ⚠ 三条都是照抄对标，别自己发挥：
@@ -116,26 +130,27 @@ export function LandingPage() {
     return () => io.disconnect();
   }, []);
 
-  /** 发送到 Agent 会话：追加用户消息 + 一条带「下一步」建议的 Agent 回复（原型态）。
-      ⚠ 提交动作要与「表单 onSubmit」和「textarea 的 Enter」共用同一份实现，别写两遍。 */
-  const submitAgentPrompt = useCallback(() => {
+  /** 首屏提交成功后进入同一项目画布；服务端未接受消息时保留输入。 */
+  const submitAgentPrompt = () => {
     const text = agentPrompt.trim();
-    if (!text) return;
-    setAgentMessages(list => {
-      const stamp = `${list.length}-${Date.now()}`;
-      return [
-        ...list,
-        { id: `u-${stamp}`, role: 'user' as const, text },
-        {
-          id: `a-${stamp}`,
-          role: 'agent' as const,
-          text: `收到。我会先把「${text}」拆成 3 个镜头，并摆出每一步的花费，你确认后再执行。`,
-          steps: ['先分析参考片节奏', '直接生成 3 个镜头', '先看预算'],
-        },
-      ];
+    if (!text || heroAgent.busy || heroAgent.running || confirmation) return;
+    if (!readSession()) {
+      window.sessionStorage.setItem('qiyin.hero.draft', text);
+      navigate('/signup?next=%2F');
+      return;
+    }
+    if (requiresAgentConfirmation(text)) { setConfirmation(text); return; }
+    void heroAgent.send(text).then(sent => {
+      if (sent) { setAgentPrompt(''); window.sessionStorage.removeItem('qiyin.hero.draft'); void enterCanvas(); }
     });
-    setAgentPrompt('');
-  }, [agentPrompt]);
+  };
+
+  const confirmAgentPrompt = () => {
+    if (!confirmation) return;
+    void heroAgent.send(confirmation).then(sent => {
+      if (sent) { setAgentPrompt(''); setConfirmation(null); window.sessionStorage.removeItem('qiyin.hero.draft'); void enterCanvas(); }
+    });
+  };
 
   const sendAgentPrompt = (event: FormEvent) => {
     event.preventDefault();
@@ -221,7 +236,7 @@ export function LandingPage() {
       <ProjectRail active="home" />
       <div className="project-list-body">
           <section
-            className={'agent-hero' + (agentMessages.length > 0 ? ' has-thread' : '')}
+            className={'agent-hero' + (hasAgentDialogue ? ' has-thread' : '')}
             ref={heroRef}
             aria-label="介绍小QTV Agent"
           >
@@ -234,10 +249,10 @@ export function LandingPage() {
             />
             {/* 三维粒子 + 引力透镜（照搬对标 chunk 里的 Qr 组件），铺满 hero、压在文案之下。
                 `onArrival` 是 hero 文案入场的触发源（对标 `!P&&f>=1.5&&onArrival()`）。 */}
-            <AgentLensCanvas
+            <LazyAgentLensCanvas
               promptRef={consoleRef}
               active={heroActive}
-              engaged={agentMessages.length > 0}
+              engaged={hasAgentDialogue}
               onArrival={handleLensArrival}
             />
             {/* ⚠ `data-ready` / `data-animate` / `inert` 三件套挂在 **copy 容器**上，不是 section 上
@@ -251,30 +266,15 @@ export function LandingPage() {
               inert={!introReady}
             >
               <div className="agent-hero-heading">
-                <h1 className="agent-hero-title hero-enter">{agentMessages.length > 0 ? '小QTV Agent' : 'A new era'}</h1>
-                {agentMessages.length === 0 && (
-                  <p className="agent-hero-sub hero-enter" style={{ '--intro-delay': '150ms' } as CSSProperties}>Introducing the intelligent 小QTV Agent. The future of generative media.</p>
+                <h1 className="agent-hero-title hero-enter">{hasAgentDialogue ? '小QTV Agent' : '全新的创作时代'}</h1>
+                {!hasAgentDialogue && (
+                <p className="agent-hero-sub hero-enter" style={{ '--intro-delay': '150ms' } as CSSProperties}>介绍全新小QTV Agent —— 生成式媒体的下一种创作方式。</p>
                 )}
               </div>
-              {agentMessages.length > 0 && (
-                <div className="agent-thread" aria-live="polite">
-                  {agentMessages.map(message => (
-                    <article className={'agent-msg ' + message.role} key={message.id}>
-                      <span className="agent-msg-avatar" aria-hidden="true">{message.role === 'user' ? '我' : '✦'}</span>
-                      <div className="agent-msg-body">
-                        <p>{message.text}</p>
-                        {message.steps && (
-                          <div className="agent-msg-steps">
-                            {message.steps.map(step => (
-                              <button key={step} type="button" className="agent-step" onClick={() => setAgentPrompt(step)}>{step}</button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              )}
+              <HeroAgentThread {...heroAgent} confirmation={confirmation} onConfirm={confirmAgentPrompt}
+                onDismiss={() => setConfirmation(null)} onNew={() => void heroAgent.newSession()}
+                onCancel={() => void heroAgent.cancel()} onReconnect={() => void heroAgent.reconnect()} />
+               {canvasNavigationError ? <p role="alert" className="hero-agent-error">{canvasNavigationError}</p> : null}
               {/* 对标把输入台包在 `role="group"` 的定位容器里，.agent-streaks 是它的 `-inset-1` 子层。
                   顺序是 streaks 在前、form 在后（streaks 靠绝对定位脱层，不靠 z-index）。
                   ⚠ 这一层承载两个**只在这一层**才有的东西（都照抄对标 `ne` 元素）：
@@ -303,7 +303,8 @@ export function LandingPage() {
                     value={agentPrompt}
                     onChange={event => setAgentPrompt(event.target.value)}
                     onKeyDown={handlePromptKeyDown}
-                    placeholder="Ask me to do anything..."
+                    disabled={heroAgent.busy || heroAgent.running || !!confirmation}
+                    placeholder="告诉我你想完成什么…"
                     rows={1}
                     aria-label="创作描述"
                   />
@@ -365,7 +366,7 @@ export function LandingPage() {
                           ./agentConsole.ts）；`stroke-width="1.5"`、`size-4`(16px)、黑色填充。
                           白圆 + 黑色四角星的观感就是它，不需要自己画 clip-path。
                           对标在输入为空时给按钮 `disabled` ⇒ `opacity-50`，所以这里也绑 disabled。 */}
-                      <button className="agent-send" type="submit" aria-label="开始创作" disabled={agentPrompt.trim().length === 0}>
+                      <button className="agent-send" type="submit" aria-label="开始创作" disabled={agentPrompt.trim().length === 0 || heroAgent.busy || heroAgent.running || !!confirmation}>
                         <svg
                           className="agent-send-icon"
                           aria-hidden="true"

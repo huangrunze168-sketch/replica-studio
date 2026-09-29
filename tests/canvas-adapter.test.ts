@@ -1,6 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   CanvasAdapter,
@@ -13,7 +11,6 @@ import {
   type CanvasRunRequest,
   type CanvasRunner,
 } from '@qiyin/canvas-adapter';
-import { createCanvasBackend } from '@qiyin/canvas-adapter';
 
 /**
  *

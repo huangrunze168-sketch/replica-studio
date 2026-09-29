@@ -149,7 +149,7 @@ describe('片段重拍', () => {
     await service.retakeShotVideo(retakeInput(projectId, workspace, revision()));
 
     const created = calls.find((call) => call.args[0] === 'node' && call.args[1] === 'create');
-    const sets = (created?.args ?? []).filter((arg, index, all) => all[index - 1] === '-s');
+    const sets = (created?.args ?? []).filter((_arg, index, all) => all[index - 1] === '-s');
     expect(sets.some((pair) => pair.startsWith('duration='))).toBe(false);
     expect(sets.some((pair) => pair.startsWith('ratio='))).toBe(false);
     /* 但要传的还得传：模型与模式 */

@@ -29,7 +29,7 @@ export const SESSION_LIMIT = 30;
 /** 单个会话最多留几条消息 */
 export const MESSAGE_LIMIT = 200;
 /** 单条消息入库前的长度上限（超长的回答截断，避免单个文件膨胀） */
-export const MESSAGE_TEXT_LIMIT = 8000;
+const MESSAGE_TEXT_LIMIT = 8000;
 
 /** 会话 id 的白名单：字母、数字、连字符，1–64 位 */
 const SESSION_ID = /^[A-Za-z0-9-]{1,64}$/;
@@ -40,9 +40,11 @@ export function isValidSessionId(value: unknown): value is string {
 
 export interface StoredMessage {
   id: string;
-  role: 'user' | 'agent' | 'tool' | 'reasoning' | 'note' | 'error';
+  role: 'user' | 'agent' | 'tool' | 'reasoning' | 'note' | 'error' | 'plan' | 'approval' | 'progress' | 'asset' | 'selection';
   text: string;
   itemId?: string;
+  /** 用户发送消息时选中的 Skill；历史只记不可执行的身份与版本，不复制第三方指令。 */
+  skillRef?: { id: string; version: string; name?: string };
   /** `pending` = 在等人（要预算 / 要批准），不是失败——见 data/agentMessages.ts */
   toolState?: 'running' | 'pending' | 'done' | 'failed' | 'unknown';
   /**
@@ -90,7 +92,8 @@ function sanitizeMessage(value: unknown): StoredMessage | null {
   const raw = value as Record<string, unknown>;
   const role = raw.role;
   if (role !== 'user' && role !== 'agent' && role !== 'tool' && role !== 'reasoning'
-    && role !== 'note' && role !== 'error') return null;
+    && role !== 'note' && role !== 'error' && role !== 'plan' && role !== 'approval'
+    && role !== 'progress' && role !== 'asset' && role !== 'selection') return null;
   const text = typeof raw.text === 'string' ? raw.text : '';
   const id = typeof raw.id === 'string' && raw.id !== '' ? raw.id : `${String(raw.role)}-${Math.random()}`;
   const message: StoredMessage = {
@@ -99,6 +102,14 @@ function sanitizeMessage(value: unknown): StoredMessage | null {
     text: text.slice(0, MESSAGE_TEXT_LIMIT),
   };
   if (typeof raw.itemId === 'string') message.itemId = raw.itemId.slice(0, 120);
+  const skillRef = raw.skillRef;
+  if (skillRef !== null && typeof skillRef === 'object') {
+    const value = skillRef as Record<string, unknown>;
+    if (typeof value.id === 'string' && /^[a-z0-9][a-z0-9-]{1,79}$/.test(value.id)
+      && typeof value.version === 'string' && value.version.length > 0 && value.version.length <= 80) {
+      message.skillRef = { id: value.id, version: value.version, ...(typeof value.name === 'string' ? { name: value.name.slice(0, 120) } : {}) };
+    }
+  }
   if (raw.toolState === 'running' || raw.toolState === 'pending' || raw.toolState === 'done'
     || raw.toolState === 'failed' || raw.toolState === 'unknown') {
     message.toolState = raw.toolState;
@@ -128,6 +139,31 @@ function sanitizeMessage(value: unknown): StoredMessage | null {
  */
 export function pruneMessages(messages: readonly StoredMessage[], trimmedBefore = 0): { messages: StoredMessage[]; trimmed: number } {
   if (messages.length <= MESSAGE_LIMIT) return { messages: [...messages], trimmed: trimmedBefore };
+  const source = messages.filter(item => !(item.role === 'note' && item.id.startsWith('trimmed-')));
+  const lastPlanIndex = source.findLastIndex(item => item.role === 'plan');
+  if (lastPlanIndex >= 0 && lastPlanIndex < source.length - MESSAGE_LIMIT) {
+    // 长期制作对话不能把仍在使用的方案、审批、选帧与最后的逐镜产物裁掉。
+    // 其余消息继续滚动裁剪；领域项目和付费请求台账仍是权威状态。
+    const pinned = new Set<number>([lastPlanIndex]);
+    const lastPlan = source[lastPlanIndex]!;
+    const latest = new Map<string, number>();
+    for (let index = lastPlanIndex + 1; index < source.length; index++) {
+      const item = source[index]!;
+      if (item.role === 'approval' && item.text === lastPlan.id) latest.set('approval', index);
+      if (item.role !== 'asset' && item.role !== 'selection' && item.role !== 'progress') continue;
+      try {
+        const value = JSON.parse(item.text) as { shotId?: unknown; kind?: unknown; phase?: unknown; artifactId?: unknown };
+        if (item.role === 'selection' && typeof value.shotId === 'string') latest.set(`selection:${value.shotId}`, index);
+        if (item.role === 'asset' && typeof value.shotId === 'string') latest.set(`asset:${value.kind === 'video' ? 'video' : 'image'}:${value.shotId}`, index);
+        if (item.role === 'progress' && (value.kind === 'video' || value.kind === 'image') && value.phase !== 'running') latest.set(`progress:${value.kind}`, index);
+      } catch { /* 非结构化日志不留作制作事实。 */ }
+    }
+    for (const index of latest.values()) pinned.add(index);
+    const start = Math.max(0, source.length - Math.max(1, MESSAGE_LIMIT - pinned.size));
+    const kept = source.filter((_, index) => index >= start || pinned.has(index));
+    const totalTrimmed = trimmedBefore + source.length - kept.length;
+    return { trimmed: totalTrimmed, messages: [{ id: `trimmed-${Date.now()}`, role: 'note', text: `更早的 ${totalTrimmed} 条消息已裁掉（当前方案与已核验制作状态保留）` }, ...kept] };
+  }
   const dropped = messages.length - MESSAGE_LIMIT;
   const kept = messages.slice(dropped);
   const note: StoredMessage = {

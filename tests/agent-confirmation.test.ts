@@ -7,6 +7,8 @@ describe('requiresAgentConfirmation', () => {
     expect(requiresAgentConfirmation('覆盖当前结果')).toBe(true);
     expect(requiresAgentConfirmation('导出高清成片')).toBe(true);
     expect(requiresAgentConfirmation('消耗生成额度')).toBe(true);
+    expect(requiresAgentConfirmation('删除所有文件')).toBe(true);
+    expect(requiresAgentConfirmation('overwrite source clips')).toBe(true);
   });
 
   it('普通分析与查询可以直接执行', () => {

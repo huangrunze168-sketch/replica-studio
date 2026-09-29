@@ -6,12 +6,14 @@ import { repairPlanSchema } from './repair-plan.js';
 import { subjectProfileInputSchema } from './subject-profile.js';
 
 export * from './primitives.js';
+export * from './video-mode-validation.js';
 export * from './spatial-plan.js';
 export * from './eval-report.js';
 export * from './repair-plan.js';
 export * from './subject-profile.js';
 export * from './node-patch-policy.js';
 export * from './video-hd-tiers.js';
+export * from './skill.js';
 
 export const shotFieldSchema = z.object({
   shot_id: z.string().min(1),
@@ -189,8 +191,71 @@ export type FilmTransition = (typeof FILM_TRANSITIONS)[number];
 export const TRANSITION_DIRECTIONS = ['left', 'right', 'up', 'down'] as const;
 export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number];
 
+/**
+ * 服务端持久化的画布文档。业务节点参数保持可扩展，但坐标、边和规模在入口处受限，
+ * 避免把 React Flow 的瞬时对象或无限大的 localStorage 数据直接写进领域库。
+ */
+export const canvasDocumentSchema = z.object({
+  version: z.literal(2),
+  nodes: z.array(z.object({
+    id: z.string().min(1).max(120),
+    type: z.string().min(1).max(80),
+    position: z.object({ x: z.number().finite(), y: z.number().finite() }),
+    width: z.number().positive().max(2_000).optional(),
+    height: z.number().positive().max(20_000).optional(),
+    data: z.record(z.string(), z.unknown()).superRefine((data, context) => {
+      if (data.variants === undefined) return;
+      if (!Array.isArray(data.variants) || data.variants.length > 8 || data.variants.some(item => !item || typeof item !== 'object' || !/^sha256:[a-f0-9]{64}$/.test(item.artifactId) || !['image', 'video', 'audio'].includes(item.mediaKind) || typeof item.name !== 'string' || item.name.length > 200)) {
+        context.addIssue({ code: 'custom', path: ['variants'], message: '生成候选必须是至多 8 个合法素材引用' });
+      }
+    }),
+    groupId: z.string().min(1).max(120).optional(),
+    locked: z.boolean().optional(),
+  })).max(500),
+  edges: z.array(z.object({
+    id: z.string().min(1).max(240),
+    source: z.string().min(1).max(120),
+    target: z.string().min(1).max(120),
+    sourceHandle: z.string().max(120).nullable().optional(),
+    targetHandle: z.string().max(120).nullable().optional(),
+    referenceRole: z.enum(['first-frame', 'last-frame', 'reference-image', 'reference-video', 'reference-audio', 'text-input']).optional(),
+  })).max(1_000),
+  viewport: z.object({ x: z.number().finite(), y: z.number().finite(), zoom: z.number().positive().min(0.05).max(8) }).optional(),
+}).superRefine((document, context) => {
+  const ids = new Set<string>();
+  document.nodes.forEach((node, index) => {
+    if (ids.has(node.id)) context.addIssue({ code: 'custom', path: ['nodes', index, 'id'], message: '节点 id 不能重复' });
+    ids.add(node.id);
+  });
+  document.edges.forEach((edge, index) => {
+    if (!ids.has(edge.source) || !ids.has(edge.target)) context.addIssue({ code: 'custom', path: ['edges', index], message: '连线端点必须存在于当前画布' });
+    if (edge.source === edge.target) context.addIssue({ code: 'custom', path: ['edges', index], message: '节点不能连接自身' });
+  });
+});
+export type CanvasDocumentContract = z.infer<typeof canvasDocumentSchema>;
+
+export const TIMELINE_TRACKS = ['C1', 'V2', 'V1', 'A1', 'A2'] as const;
+export const timelineDocumentSchema = z.object({
+  version: z.literal(1),
+  ripple: z.boolean(),
+  clips: z.array(z.object({
+    id: z.string().min(1).max(120),
+    track: z.enum(TIMELINE_TRACKS),
+    label: z.string().min(1).max(160),
+    startMs: z.number().int().nonnegative(),
+    durationMs: z.number().int().positive().max(3_600_000),
+    sourceOffsetMs: z.number().int().nonnegative(),
+    shotId: z.string().min(1).max(120).optional(),
+    artifactId: sha256Schema.optional(),
+  })).max(2_000),
+}).superRefine((document, context) => {
+  const ids = new Set<string>();
+  document.clips.forEach((clip, index) => { if (ids.has(clip.id)) context.addIssue({ code: 'custom', path: ['clips', index, 'id'], message: '片段 id 不能重复' }); ids.add(clip.id); });
+});
+export type TimelineDocumentContract = z.infer<typeof timelineDocumentSchema>;
+
 export const commandSchema = z.discriminatedUnion('type', [
-  z.object({ ...baseCommandFields, type: z.literal('project.create'), payload: z.object({ name: z.string().min(1).max(120), max_budget_cents: z.number().int().nonnegative(), rights_confirmed: z.boolean() }) }),
+  z.object({ ...baseCommandFields, type: z.literal('project.create'), payload: z.object({ name: z.string().min(1).max(120), workspace_id: uuidSchema.optional(), workspace_name: z.string().min(1).max(120).optional(), max_budget_cents: z.number().int().nonnegative(), rights_confirmed: z.boolean() }) }),
   /**
    * 项目删除分两步，不是一个"删除"按钮。
    *
@@ -285,7 +350,11 @@ export const commandSchema = z.discriminatedUnion('type', [
    */
   z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('shot.playback.set'), payload: z.object({ shot_id: z.string().min(1), playback: z.enum(['inherit', 'hold', 'stretch']) }) }),
   z.object({ ...baseCommandFields, type: z.literal('provider.register'), payload: z.object({ manifest: providerManifestSchema }) }),
+  /** 仅在用户明确确认素材权利与预算上限后调用；不表示已经消费费用。 */
+  z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('project.production.authorize'), payload: z.object({ max_budget_cents: z.number().int().min(1).max(1_000_000), rights_confirmed: z.literal(true) }) }),
   z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('shot-fields.replace'), payload: z.object({ breakdown_revision: z.number().int().nonnegative(), shots: z.array(shotFieldSchema).min(1) }) }),
+  z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('canvas-document.replace'), payload: z.object({ document: canvasDocumentSchema }) }),
+  z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('timeline-document.replace'), payload: z.object({ document: timelineDocumentSchema }) }),
   z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('gate.approve'), payload: z.object({ gate: gateSchema, note: z.string().max(500).optional(), approved_budget_cents: z.number().int().nonnegative().optional() }) }),
   z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('prompt.derive'), payload: z.object({ kit_version: z.string().min(1), model_id: z.string().min(1) }) }),
   z.object({ ...baseCommandFields, ...projectCommandFields, type: z.literal('image-candidate.add'), payload: z.object({ shot_id: z.string().min(1), candidate_id: z.string().min(1), artifact_id: sha256Schema }) }),
@@ -587,7 +656,10 @@ export const COMMAND_TYPES = [
   'film.settings.set',
   'shot.playback.set',
   'provider.register',
+  'project.production.authorize',
   'shot-fields.replace',
+  'canvas-document.replace',
+  'timeline-document.replace',
   'gate.approve',
   'prompt.derive',
   'image-candidate.add',

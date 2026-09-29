@@ -868,7 +868,7 @@ export class GenerationService {
           "同一请求"，于是直接复用上一次的结果——改了摆位、图没变，
           而界面上一切显示成功。
         */
-        const subjectReference = this.subjectReferenceFor(request.projectId, plan?.subjects ?? []);
+        const subjectReference = this.subjectReferenceFor(plan?.subjects ?? []);
         const stagingPrompt = buildDirectorStagingPrompt({
           basePrompt: shot.prompt,
           /* 有了主体档案就把名字带上：提示词里前后指的必须是同一个人 */
@@ -1554,7 +1554,6 @@ export class GenerationService {
    * 已被删除的主体，那种情况下多拼一句话只会让模型困惑。
    */
   private subjectReferenceFor(
-    projectId: string,
     subjects: readonly StagingSubject[],
   ): {
     fragment: string;

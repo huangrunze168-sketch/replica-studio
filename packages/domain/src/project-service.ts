@@ -22,6 +22,7 @@ import { DomainError, assertDomain } from './errors.js';
 
 interface ProjectRow {
   id: string;
+  workspace_id: string;
   name: string;
   revision: number;
   state: string;
@@ -170,6 +171,8 @@ export const PROJECT_CHILD_TABLES: readonly string[] = [
      它带 project_id，漏了的话 `project.purge` 会撞外键、报一句"内部错误"（踩过一次）。 */
   'asset_generation_intents',
   'prompt_bundles',
+  'canvas_documents',
+  'timeline_documents',
   'shot_fields',
   'spatial_plans',
   'kernel_tasks',
@@ -364,7 +367,7 @@ function buildSeedShots(
 }
 
 const PACKAGE_PROJECT_TABLES = [
-  'events', 'shot_fields', 'gate_decisions', 'prompt_bundles', 'image_candidates', 'selections',
+  'events', 'shot_fields', 'canvas_documents', 'timeline_documents', 'gate_decisions', 'prompt_bundles', 'image_candidates', 'selections',
   'video_intents', 'spatial_plans', 'kernel_tasks', 'source_assets', 'eval_reports', 'repair_plans',
   'image_generation_intents', 'video_generation_intents', 'generation_checkpoints', 'asset_ratings', 'shot_playback',
 ] as const;
@@ -467,7 +470,10 @@ export class ProjectService {
       case 'film.settings.set': return this.setFilmSettings(command);
       case 'shot.playback.set': return this.setShotPlayback(command);
       case 'provider.register': return this.registerProvider(command);
+      case 'project.production.authorize': return this.authorizeProduction(command);
       case 'shot-fields.replace': return this.replaceShotFields(command);
+      case 'canvas-document.replace': return this.replaceCanvasDocument(command);
+      case 'timeline-document.replace': return this.replaceTimelineDocument(command);
       case 'gate.approve': return this.approveGate(command);
       case 'prompt.derive': return this.derivePrompt(command);
       case 'image-candidate.add': return this.addCandidate(command);
@@ -532,10 +538,21 @@ export class ProjectService {
       改名那条命令用的是同一套规则，所以这里也必须是同一套。
     */
     const name = command.payload.name.trim();
-    this.db.prepare(`INSERT INTO projects(id, name, revision, state, max_budget_cents, rights_confirmed, created_at, updated_at)
-      VALUES (?, ?, 1, ?, ?, ?, ?, ?)`).run(id, name, state, command.payload.max_budget_cents, command.payload.rights_confirmed ? 1 : 0, createdAt, createdAt);
-    this.event(id, 1, 'project.created', command, { name, state, max_budget_cents: command.payload.max_budget_cents, rights_confirmed: command.payload.rights_confirmed });
-    return this.envelope(command, id, 1, { project_id: id, name, state });
+    let workspaceId = command.payload.workspace_id;
+    if (workspaceId) {
+      const workspace = this.db.prepare('SELECT id FROM workspaces WHERE id=? AND deleted_at IS NULL').get(workspaceId);
+      assertDomain(workspace, 'WORKSPACE_NOT_FOUND', '工作区不存在', 404);
+      this.db.prepare('UPDATE workspaces SET revision=revision+1, updated_at=? WHERE id=?').run(createdAt, workspaceId);
+    } else {
+      workspaceId = randomUUID();
+      const workspaceName = command.payload.workspace_name?.trim() || name;
+      this.db.prepare('INSERT INTO workspaces(id, name, revision, created_at, updated_at) VALUES (?, ?, 1, ?, ?)')
+        .run(workspaceId, workspaceName, createdAt, createdAt);
+    }
+    this.db.prepare(`INSERT INTO projects(id, workspace_id, name, revision, state, max_budget_cents, rights_confirmed, created_at, updated_at)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)`).run(id, workspaceId, name, state, command.payload.max_budget_cents, command.payload.rights_confirmed ? 1 : 0, createdAt, createdAt);
+    this.event(id, 1, 'project.created', command, { workspace_id: workspaceId, name, state, max_budget_cents: command.payload.max_budget_cents, rights_confirmed: command.payload.rights_confirmed });
+    return this.envelope(command, id, 1, { workspace_id: workspaceId, project_id: id, name, state });
   }
 
   /**
@@ -665,11 +682,12 @@ export class ProjectService {
     const timestamp = now();
     const baseName = command.payload.name?.trim() || `${source.name} · 副本`;
     this.db.prepare(
-      `INSERT INTO projects(id, name, revision, state, max_budget_cents, reserved_budget_cents, rights_confirmed, folder_id, deleted_at, created_at, updated_at,
+      `INSERT INTO projects(id, workspace_id, name, revision, state, max_budget_cents, reserved_budget_cents, rights_confirmed, folder_id, deleted_at, created_at, updated_at,
         film_playback, film_transition, film_transition_direction)
-       VALUES (?, ?, 1, ?, ?, 0, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, 1, ?, ?, 0, ?, NULL, NULL, ?, ?, ?, ?, ?)`,
     ).run(
       id,
+      source.workspace_id,
       baseName,
       source.state,
       source.max_budget_cents,
@@ -1010,9 +1028,50 @@ export class ProjectService {
     return this.envelope(command, null, null, { provider_id: manifest.provider_id, registered: true, test_only: manifest.testOnly });
   }
 
+  /** 只允许显式扩大项目预算上限；实际供应商调用仍须通过 G1/G2 与逐次费用确认。 */
+  private authorizeProduction(command: Extract<DomainCommand, { type: 'project.production.authorize' }>): ResultEnvelope {
+    const project = this.projectForWrite(command.project_id, command.expected_revision);
+    const budget = command.payload.max_budget_cents;
+    assertDomain(budget >= project.max_budget_cents, 'BUDGET_CANNOT_DECREASE', '不能用生产授权降低已有项目预算上限', 409);
+    const revision = project.revision + 1;
+    const timestamp = now();
+    this.db.prepare('UPDATE projects SET max_budget_cents=?, rights_confirmed=1 WHERE id=?').run(budget, project.id);
+    this.advanceProject(project.id, revision, project.state, timestamp);
+    this.event(project.id, revision, 'project.production.authorized', command, { max_budget_cents: budget, rights_confirmed: true });
+    return this.envelope(command, project.id, revision, { max_budget_cents: budget, rights_confirmed: true });
+  }
+
   private replaceShotFields(command: Extract<DomainCommand, { type: 'shot-fields.replace' }>): ResultEnvelope {
     const project = this.projectForWrite(command.project_id, command.expected_revision);
     return this.writeShotFields(project, command, command.payload.shots as ShotField[], command.payload.breakdown_revision, 'shot-fields.replaced');
+  }
+
+  private replaceCanvasDocument(command: Extract<DomainCommand, { type: 'canvas-document.replace' }>): ResultEnvelope {
+    const project = this.projectForWrite(command.project_id, command.expected_revision);
+    const revision = project.revision + 1;
+    const timestamp = now();
+    const document = command.payload.document;
+    this.db.prepare(`INSERT INTO canvas_documents(project_id, document_revision, document_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET document_revision=excluded.document_revision, document_json=excluded.document_json, updated_at=excluded.updated_at`)
+      .run(project.id, revision, json(document), timestamp);
+    this.advanceProject(project.id, revision, project.state, timestamp);
+    this.event(project.id, revision, 'canvas-document.replaced', command, { document });
+    return this.envelope(command, project.id, revision, { document_revision: revision });
+  }
+
+  private replaceTimelineDocument(command: Extract<DomainCommand, { type: 'timeline-document.replace' }>): ResultEnvelope {
+    const project = this.projectForWrite(command.project_id, command.expected_revision);
+    const revision = project.revision + 1;
+    const timestamp = now();
+    const document = command.payload.document;
+    this.db.prepare(`INSERT INTO timeline_documents(project_id, document_revision, document_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET document_revision=excluded.document_revision, document_json=excluded.document_json, updated_at=excluded.updated_at`)
+      .run(project.id, revision, json(document), timestamp);
+    this.advanceProject(project.id, revision, project.state, timestamp);
+    this.event(project.id, revision, 'timeline-document.replaced', command, { document });
+    return this.envelope(command, project.id, revision, { document_revision: revision });
   }
 
   /**
@@ -1757,7 +1816,9 @@ export class ProjectService {
       assertDomain(missing.length === 0, 'FIRST_FRAME_REQUIRED', '每个镜头都必须选择首帧后才能批准 G2', 409, { missing_shot_ids: missing });
       const approvedBudget = command.payload.approved_budget_cents;
       assertDomain(approvedBudget !== undefined, 'VIDEO_BUDGET_REQUIRED', 'G2 必须明确批准视频预算');
-      assertDomain(approvedBudget <= project.max_budget_cents - project.reserved_budget_cents, 'BUDGET_EXCEEDED', '批准预算超过项目剩余预算', 409);
+      // G2 存储项目累计占用上限；视频请求按已占用金额加本次预估比较，不能重复扣掉既有费用。
+      assertDomain(approvedBudget >= project.reserved_budget_cents && approvedBudget <= project.max_budget_cents,
+        'BUDGET_EXCEEDED', 'G2 累计占用上限必须覆盖已占用金额且不超过项目上限', 409);
     }
     /**
      * G4：修复前批准。
@@ -2413,6 +2474,11 @@ export class ProjectService {
     }
 
     const reasons: string[] = [];
+    // 内容寻址产物是全局身份；保护其他项目画布候选与时间线引用，不能只看当前删除请求的项目。
+    for (const [table, label] of [['canvas_documents', '画布节点或候选'], ['timeline_documents', '时间线片段']] as const) {
+      const hit = this.db.prepare(`SELECT project_id FROM ${table} WHERE document_json LIKE '%' || ? || '%' LIMIT 1`).get(artifactId) as unknown as { project_id: string } | undefined;
+      if (hit) reasons.push(hit.project_id === project.id ? `它仍被${label}引用` : `它仍被另一个项目的${label}引用`);
+    }
     if (asCandidate.length > 0) {
       const first = asCandidate[0]!;
       reasons.push(first.project_id === project.id
@@ -2667,8 +2733,73 @@ export class ProjectService {
    * "全部项目"里看到自己以为已经删掉的东西。要回收站内容显式调
    * `listTrashedProjects()`。
    */
+  /** LibTV 的 space/workspace 容器列表；project 是其下的画布，二者 id 永不复用。 */
+  listWorkspaces(trashed = false): unknown[] {
+    return this.db.prepare(`SELECT w.id, w.name, w.revision, w.deleted_at, w.created_at, w.updated_at,
+      COUNT(p.id) AS canvas_count,
+      (SELECT p2.id FROM projects p2 WHERE p2.workspace_id=w.id AND p2.deleted_at IS NULL ORDER BY p2.created_at LIMIT 1) AS primary_project_id
+      FROM workspaces w LEFT JOIN projects p ON p.workspace_id=w.id AND p.deleted_at IS NULL
+      WHERE ${trashed ? 'w.deleted_at IS NOT NULL' : 'w.deleted_at IS NULL'}
+      GROUP BY w.id ORDER BY ${trashed ? 'w.deleted_at' : 'w.updated_at'} DESC`).all();
+  }
+
+  getWorkspace(workspaceId: string): unknown {
+    const workspace = this.db.prepare('SELECT id, name, revision, deleted_at, created_at, updated_at FROM workspaces WHERE id=?').get(workspaceId) as unknown as Record<string, unknown> | undefined;
+    assertDomain(workspace, 'WORKSPACE_NOT_FOUND', '工作区不存在', 404);
+    const canvases = this.db.prepare('SELECT id, workspace_id, name, revision, state, deleted_at, created_at, updated_at FROM projects WHERE workspace_id=? ORDER BY created_at').all(workspaceId);
+    return { ...workspace, canvases };
+  }
+
+  renameWorkspace(workspaceId: string, nameInput: string): unknown {
+    const workspace = this.db.prepare('SELECT id, name, revision FROM workspaces WHERE id=?').get(workspaceId) as unknown as { id: string; name: string; revision: number } | undefined;
+    assertDomain(workspace, 'WORKSPACE_NOT_FOUND', '工作区不存在', 404);
+    const name = nameInput.trim();
+    assertDomain(name.length > 0, 'WORKSPACE_NAME_REQUIRED', '工作区名称不能为空', 422);
+    const timestamp = now();
+    this.db.prepare('UPDATE workspaces SET name=?, revision=?, updated_at=? WHERE id=?').run(name, workspace.revision + 1, timestamp, workspaceId);
+    return this.getWorkspace(workspaceId);
+  }
+
+  trashWorkspace(workspaceId: string): unknown {
+    const workspace = this.db.prepare('SELECT id FROM workspaces WHERE id=?').get(workspaceId);
+    assertDomain(workspace, 'WORKSPACE_NOT_FOUND', '工作区不存在', 404);
+    const timestamp = now();
+    this.db.prepare('UPDATE workspaces SET deleted_at=?, revision=revision+1, updated_at=? WHERE id=?').run(timestamp, timestamp, workspaceId);
+    this.db.prepare('UPDATE projects SET deleted_at=COALESCE(deleted_at, ?), updated_at=? WHERE workspace_id=?').run(timestamp, timestamp, workspaceId);
+    return this.getWorkspace(workspaceId);
+  }
+
+  restoreWorkspace(workspaceId: string): unknown {
+    const workspace = this.db.prepare('SELECT id FROM workspaces WHERE id=?').get(workspaceId);
+    assertDomain(workspace, 'WORKSPACE_NOT_FOUND', '工作区不存在', 404);
+    const timestamp = now();
+    this.db.prepare('UPDATE workspaces SET deleted_at=NULL, revision=revision+1, updated_at=? WHERE id=?').run(timestamp, workspaceId);
+    this.db.prepare('UPDATE projects SET deleted_at=NULL, updated_at=? WHERE workspace_id=?').run(timestamp, workspaceId);
+    return this.getWorkspace(workspaceId);
+  }
+
+  purgeWorkspace(workspaceId: string, confirmName: string): void {
+    const workspace = this.db.prepare('SELECT id, name, deleted_at FROM workspaces WHERE id=?').get(workspaceId) as unknown as { id: string; name: string; deleted_at: string | null } | undefined;
+    assertDomain(workspace, 'WORKSPACE_NOT_FOUND', '工作区不存在', 404);
+    assertDomain(workspace.deleted_at !== null, 'WORKSPACE_NOT_TRASHED', '只有回收站里的工作区才能彻底删除', 409);
+    assertDomain(confirmName === workspace.name, 'WORKSPACE_NAME_MISMATCH', '工作区名称不一致，没有执行彻底删除', 409);
+    const canvases = this.db.prepare('SELECT id FROM projects WHERE workspace_id=?').all(workspaceId) as unknown as Array<{ id: string }>;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const canvas of canvases) {
+        for (const table of PROJECT_CHILD_TABLES) this.db.prepare(`DELETE FROM ${table} WHERE project_id=?`).run(canvas.id);
+      }
+      this.db.prepare('DELETE FROM projects WHERE workspace_id=?').run(workspaceId);
+      this.db.prepare('DELETE FROM workspaces WHERE id=?').run(workspaceId);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
   listProjects(): unknown[] {
-    return this.db.prepare('SELECT id, name, revision, state, max_budget_cents, reserved_budget_cents, folder_id, film_playback, film_transition, film_transition_direction, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC').all();
+    return this.db.prepare('SELECT id, workspace_id, name, revision, state, max_budget_cents, reserved_budget_cents, folder_id, film_playback, film_transition, film_transition_direction, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC').all();
   }
 
   /**
@@ -2683,15 +2814,17 @@ export class ProjectService {
 
   /** 回收站：按移入时间倒序（最近删的在最前面，和用户的期待一致）。 */
   listTrashedProjects(): unknown[] {
-    return this.db.prepare('SELECT id, name, revision, state, max_budget_cents, reserved_budget_cents, folder_id, film_playback, film_transition, film_transition_direction, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC').all();
+    return this.db.prepare('SELECT id, workspace_id, name, revision, state, max_budget_cents, reserved_budget_cents, folder_id, film_playback, film_transition, film_transition_direction, deleted_at, created_at, updated_at FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC').all();
   }
 
   getProject(projectId: string): unknown {
-    const project = this.db.prepare('SELECT id, name, revision, state, max_budget_cents, reserved_budget_cents, rights_confirmed, folder_id, film_playback, film_transition, film_transition_direction, deleted_at, created_at, updated_at FROM projects WHERE id=?').get(projectId) as unknown as ProjectRow | undefined;
+    const project = this.db.prepare('SELECT id, workspace_id, name, revision, state, max_budget_cents, reserved_budget_cents, rights_confirmed, folder_id, film_playback, film_transition, film_transition_direction, deleted_at, created_at, updated_at FROM projects WHERE id=?').get(projectId) as unknown as ProjectRow | undefined;
     assertDomain(project, 'PROJECT_NOT_FOUND', '项目不存在', 404);
     const fields = this.shotFields(projectId);
     const gates = this.db.prepare(`SELECT gate, status, approved_project_revision, approved_fields_revision, approved_budget_cents, created_at FROM gate_decisions WHERE project_id=? ORDER BY sequence`).all(projectId) as unknown as GateSnapshot[];
     const selections = this.db.prepare('SELECT shot_id, candidate_id, selection_revision FROM selections WHERE project_id=? ORDER BY shot_id').all(projectId);
+    const canvasDocument = this.db.prepare('SELECT document_revision, document_json, updated_at FROM canvas_documents WHERE project_id=?').get(projectId) as unknown as { document_revision: number; document_json: string; updated_at: string } | undefined;
+    const timelineDocument = this.db.prepare('SELECT document_revision, document_json, updated_at FROM timeline_documents WHERE project_id=?').get(projectId) as unknown as { document_revision: number; document_json: string; updated_at: string } | undefined;
     /**
      * `gates` 是 append-only 的审计历史：同一个闸门会同时留下旧的 APPROVED 与新的 SUPERSEDED。
      * 当成已批准——与领域层 `currentGate()` 的判断相反。因此这里直接给出权威的当前状态，
@@ -2701,6 +2834,8 @@ export class ProjectService {
       ...project,
       rights_confirmed: Boolean(project.rights_confirmed),
       shot_fields: fields ? { ...fields, shots: JSON.parse(fields.shots_json), shots_json: undefined } : null,
+      canvas_document: canvasDocument ? { document_revision: canvasDocument.document_revision, document: JSON.parse(canvasDocument.document_json), updated_at: canvasDocument.updated_at } : null,
+      timeline_document: timelineDocument ? { document_revision: timelineDocument.document_revision, document: JSON.parse(timelineDocument.document_json), updated_at: timelineDocument.updated_at } : null,
       gates,
       gate_status: this.gateStatuses(projectId),
       selections,

@@ -17,13 +17,6 @@ function command(type: string, payload: unknown, extras: Record<string, unknown>
   return { command_id: randomUUID(), actor: 'user:test', type, payload, ...extras };
 }
 
-const shot = (id: string) => ({
-  shot_id: id, t0_ms: 0, t1_ms: 2100, duration_ms: 2100,
-  shot_size: 'medium_close_up', camera_position: 'eye_level', camera_move: 'slow_push_in',
-  lighting: 'soft_key_from_left', sound: 'dialogue', replacement: '替换人物，保留窗光方向',
-  confidence: 0.9, source: 'human', author: 'user:test',
-} as const);
-
 const ARTIFACT = `sha256:${'a'.repeat(64)}`;
 const OTHER = `sha256:${'b'.repeat(64)}`;
 
@@ -57,6 +50,29 @@ describe('删除产物', () => {
     expect(payload.artifact_path_relative).toBe('uploads/x.png');
     expect((service.listArtifacts() as Array<{ artifact_id: string }>)
       .some((item) => item.artifact_id === ARTIFACT)).toBe(false);
+  });
+
+  it('其他项目画布的非 keeper 候选保护全局产物', () => {
+    const { service, projectId, revision } = setup();
+    const otherId = service.execute(command('project.create', { name: '引用它的项目', max_budget_cents: 0, rights_confirmed: false })).project_id!;
+    service.execute(command('artifact.publish', { artifact_id: ARTIFACT, media_type: 'image/png', bytes: 10 }));
+    const node = { id: 'image-node', type: 'qtv', position: { x: 0, y: 0 }, data: { kind: 'image-edit', label: '首帧', aspectRatio: '16:9', prompt: '参考', status: 'ready', artifactId: OTHER, variants: [{ artifactId: ARTIFACT, mediaKind: 'image', name: '备选项' }] } };
+    service.execute(command('canvas-document.replace', { document: { version: 2, nodes: [node], edges: [] } }, { project_id: otherId, expected_revision: 1 }));
+    let caught: unknown;
+    try { service.execute(command('artifact.delete', { artifact_id: ARTIFACT }, { project_id: projectId, expected_revision: revision() })); } catch (error) { caught = error; }
+    expect((caught as { code?: string }).code).toBe('ARTIFACT_STILL_REFERENCED');
+    expect((caught as { message?: string }).message).toContain('另一个项目的画布节点或候选');
+  });
+
+  it('其他项目时间线的片段引用也保护全局产物', () => {
+    const { service, projectId, revision } = setup();
+    const otherId = service.execute(command('project.create', { name: '时间线引用项目', max_budget_cents: 0, rights_confirmed: false })).project_id!;
+    service.execute(command('artifact.publish', { artifact_id: ARTIFACT, media_type: 'image/png', bytes: 10 }));
+    service.execute(command('timeline-document.replace', { document: { version: 1, ripple: true, clips: [{ id: 'clip-other', track: 'V1', label: '参考素材', startMs: 0, durationMs: 1000, sourceOffsetMs: 0, artifactId: ARTIFACT }] } }, { project_id: otherId, expected_revision: 1 }));
+    let caught: unknown;
+    try { service.execute(command('artifact.delete', { artifact_id: ARTIFACT }, { project_id: projectId, expected_revision: revision() })); } catch (error) { caught = error; }
+    expect((caught as { code?: string }).code).toBe('ARTIFACT_STILL_REFERENCED');
+    expect((caught as { message?: string }).message).toContain('另一个项目的时间线片段');
   });
 
   it('还是某一镜的首帧候选：拒绝，并说清是"哪一镜的什么"', () => {
@@ -309,7 +325,7 @@ describe('删除产物 · 磁盘路径的两个键', () => {
   ============================================================ */
 describe('产物 · 落点换了', () => {
   it('同内容二次发布、路径变了：报出被顶替的那一份（含项目 id）', () => {
-    const { service, projectId, revision } = setup();
+    const { service, projectId } = setup();
     const seen: Array<{ artifactId: string; projectId: string | null; from: string; to: string }> = [];
     service.onArtifactSuperseded = (info) => seen.push(info);
 

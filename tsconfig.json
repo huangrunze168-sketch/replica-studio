@@ -27,7 +27,6 @@
       "@qiyin/update-service": ["packages/update-service/src/index.ts"],
       "@qiyin/plugin-host": ["packages/plugin-host/src/index.ts"],
       "@qiyin/provider-auth": ["packages/provider-auth/src/index.ts"],
-      "@qiyin/background-removal-provider": ["packages/background-removal-provider/src/index.ts"],
       "@qiyin/local-backend-host": ["apps/local-backend-host/src/index.ts"]
     }
   },

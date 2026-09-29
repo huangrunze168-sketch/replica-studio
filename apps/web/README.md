@@ -23,7 +23,7 @@ npm run dev
 
 ## 已复用的旧项目能力
 
-网页端的画布节点类型、生成节点判定、画面比例、生成任务状态和连接规则沉淀在 `src/domain/canvas.ts` 与 `src/domain/canvasConnections.ts`；生成诊断中的敏感信息脱敏规则见 `src/domain/generationDiagnostics.ts`。`src/features/canvas/Canvas.tsx` 是网页版画布，使用 React Flow 承载拖拽、连线、缩放、MiniMap、删除和节点工具栏，不引用 Tauri、Electron 或桌面 Store。
+网页端的画布节点类型、生成节点判定、画面比例、生成任务状态和连接规则沉淀在 `src/domain/canvas.ts` 与 `src/domain/canvasConnections.ts`。`src/features/canvas/Canvas.tsx` 是网页版画布，使用 React Flow 承载拖拽、连线、缩放、MiniMap、删除和节点工具栏，不引用 Tauri、Electron 或桌面 Store。
 
 ## 构建
 

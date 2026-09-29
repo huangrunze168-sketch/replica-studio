@@ -8,7 +8,8 @@ import { useSyncExternalStore } from 'react';
  * （src/state/uiStore.ts 用 useSyncExternalStore）。再引一个 ~30KB 的
  * 路由框架，换来的是嵌套布局 / loader / 预取这些当前用不到的能力。
  *
- * 逃生舱：路由的全部外部契约就是 navigate() / useRoute() / projectHref()。
+ * 逃生舱：路由的外部契约是 navigate() / useRoute() / canvasHref()；
+ * projectHref() 只保留旧链接兼容。
  * 将来若要换 react-router，只要改这一个文件，消费方代码不用动。
  */
 
@@ -16,16 +17,17 @@ export type Route =
   | { name: 'landing' }
   | { name: 'signup' }
   | { name: 'create' }
+  | { name: 'skill' }
   | { name: 'workbenchHome' }
+  | { name: 'agentHome' }
+  | { name: 'canvas'; workspaceId: string | null; projectId: string | null; newProject: boolean }
   | { name: 'workbench'; projectId: string }
   | { name: 'not-found' };
-
-/** `/workbench` 无项目段时的回落项目，沿用原 App.tsx 的默认值。 */
-export const DEFAULT_PROJECT_ID = 'p-demo';
 
 const listeners = new Set<() => void>();
 
 let currentPath = typeof window === 'undefined' ? '/' : window.location.pathname;
+let currentSearch = typeof window === 'undefined' ? '' : window.location.search;
 
 function emit() {
   for (const listener of listeners) listener();
@@ -38,7 +40,8 @@ function subscribe(listener: () => void) {
   };
 }
 
-const getSnapshot = () => currentPath;
+// 把 query 纳入订阅快照：同一路径的状态入口（如 ?create=1）也必须触发页面重渲染。
+const getSnapshot = () => `${currentPath}${currentSearch}`;
 
 /** 匹配结果按 pathname 缓存：同路径下返回同一个对象引用，
  * 这样 useRoute() 的返回值可以安全放进 useEffect / useMemo 依赖。
@@ -46,8 +49,9 @@ const getSnapshot = () => currentPath;
 let cachedPath = '';
 let cachedRoute: Route = { name: 'landing' };
 
-export function matchRoute(pathname: string): Route {
-  if (pathname === cachedPath) return cachedRoute;
+export function matchRoute(pathname: string, search = ''): Route {
+  const cacheKey = pathname + search;
+  if (cacheKey === cachedPath) return cachedRoute;
 
   const segments = pathname.split('/').filter(Boolean);
   let next: Route;
@@ -58,25 +62,44 @@ export function matchRoute(pathname: string): Route {
     next = { name: 'signup' };
   } else if (segments[0] === 'create') {
     next = { name: 'create' };
+  } else if (segments[0] === 'skill') {
+    next = { name: 'skill' };
+  } else if (segments[0] === 'canvas') {
+    const query = new URLSearchParams(search);
+    next = { name: 'canvas', workspaceId: query.get('spaceId'), projectId: query.get('projectId'), newProject: query.get('newProject') === 'true' };
   } else if (segments[0] === 'workbench') {
+    const query = new URLSearchParams(search);
     next = segments[1]
       ? { name: 'workbench', projectId: decodeURIComponent(segments[1]) }
-      : { name: 'workbenchHome' };
+      : query.get('agent') === '1'
+        ? { name: 'agentHome' }
+        : { name: 'workbenchHome' };
   } else {
     // 未知路径落到 404 页，而不是白屏或冒充落地页。
     next = { name: 'not-found' };
   }
 
-  cachedPath = pathname;
+  cachedPath = cacheKey;
   cachedRoute = next;
   return next;
 }
 
 /** 当前路由。订阅 popstate，因此浏览器前进 / 后退可用。 */
 export function useRoute(): Route {
-  return matchRoute(useSyncExternalStore(subscribe, getSnapshot, getSnapshot));
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const [pathname, query = ''] = snapshot.split('?');
+  return matchRoute(pathname || '/', query ? `?${query}` : '');
 }
 
+export function canvasHref(workspaceId: string, projectId: string) {
+  return `/canvas?spaceId=${encodeURIComponent(workspaceId)}&projectId=${encodeURIComponent(projectId)}`;
+}
+
+export function newCanvasHref(source = 'sidebar_create_new', itemKey = 'create_new') {
+  return `/canvas?newProject=true&source=${encodeURIComponent(source)}&itemKey=${encodeURIComponent(itemKey)}`;
+}
+
+/** 旧链接只作为历史兼容；新代码必须同时携带 spaceId 与 projectId。 */
 export function projectHref(projectId: string) {
   return `/workbench/${encodeURIComponent(projectId)}`;
 }
@@ -101,11 +124,12 @@ export function navigate(to: string, options: { replace?: boolean } = {}) {
   }
 
   currentPath = url.pathname;
+  currentSearch = url.search;
   emit();
 }
 
 /** 本应用真正拥有的路径前缀。不在其中的链接交给浏览器正常处理。 */
-const INTERNAL_ROOTS = new Set(['', 'signup', 'create', 'workbench']);
+const INTERNAL_ROOTS = new Set(['', 'signup', 'create', 'skill', 'workbench', 'canvas']);
 
 export type LinkDecision =
   /** 站内路由跳转 */
@@ -133,6 +157,9 @@ export function resolveLinkDecision(anchorHref: string, currentHref: string): Li
   if (url.origin !== current.origin) return { kind: 'browser' };
 
   if (url.pathname === current.pathname) {
+    // 同一路径但 query 变化（例如 /workbench?create=1）仍然是一次站内跳转，
+    // 不能被当作无意义点击吞掉；页面会据此打开对应的面板或预设状态。
+    if (url.search !== current.search) return { kind: 'navigate', to: url.pathname + url.search };
     // 只变 hash（#demo / #method）→ 交给浏览器滚动
     if (url.hash && url.hash !== current.hash) return { kind: 'browser' };
     return { kind: 'swallow' };
@@ -176,6 +203,7 @@ function interceptClicks(event: MouseEvent) {
 if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => {
     currentPath = window.location.pathname;
+    currentSearch = window.location.search;
     emit();
   });
   document.addEventListener('click', interceptClicks);

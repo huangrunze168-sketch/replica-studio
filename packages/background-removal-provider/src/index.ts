@@ -2,7 +2,6 @@ import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 
-export const BACKGROUND_REMOVAL_MODULE = { name: '@frontkernel/background-removal', version: '1' } as const;
 export const BACKGROUND_REMOVAL_CAPABILITY = '@frontkernel/background-removal@1#remove-background' as const;
 
 export interface BackgroundRemovalBlobArtifact {

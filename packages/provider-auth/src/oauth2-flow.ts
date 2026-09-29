@@ -73,6 +73,13 @@ const DEFAULT_SUCCESS_HTML = `<!doctype html><html lang="zh-CN"><head><meta char
 <title>授权完成</title></head><body style="font-family:system-ui;padding:48px;text-align:center">
 <h2>授权完成，可以关闭这个页面了</h2><p>请回到 小QTV 继续操作。</p></body></html>`;
 
+/** 浏览器和 Node fetch 禁止访问的部分 TCP 端口；系统分配到这些端口时必须重新监听。 */
+const forbiddenFetchPorts = new Set([1719, 1720, 1723, 2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080]);
+const escapeCallbackHtml = (value: string) => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] ?? char);
+export function isFetchSafeLoopbackPort(port: number): boolean {
+  return Number.isInteger(port) && port > 1023 && port < 65535 && !forbiddenFetchPorts.has(port);
+}
+
 /**
  * 起一个只监听 127.0.0.1 的一次性回调服务器。
  *
@@ -111,7 +118,7 @@ export async function startLoopbackReceiver(options: LoopbackOptions = {}): Prom
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       response.end(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"></head>
 <body style="font-family:system-ui;padding:48px;text-align:center">
-<h2>授权未完成</h2><p>${error} ${description}</p></body></html>`);
+<h2>授权未完成</h2><p>${escapeCallbackHtml(error)} ${escapeCallbackHtml(description)}</p></body></html>`);
       rejectCode(new ProviderAuthError('token-request-failed', `授权被拒绝：${error} ${description}`.trim()));
       return;
     }
@@ -127,14 +134,21 @@ export async function startLoopbackReceiver(options: LoopbackOptions = {}): Prom
     resolveCode({ code, state: state ?? '' });
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => { resolve(); });
-  });
-  const address = server.address();
-  if (address === null || typeof address === 'string') {
-    server.close();
-    throw new ProviderAuthError('token-request-failed', '无法在 127.0.0.1 上开启回调端口');
+  let address = server.address();
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => { server.off('listening', onListen); reject(error); };
+      const onListen = () => { server.off('error', onError); resolve(); };
+      server.once('error', onError);
+      server.once('listening', onListen);
+      server.listen(0, '127.0.0.1');
+    });
+    address = server.address();
+    if (address !== null && typeof address !== 'string' && isFetchSafeLoopbackPort(address.port)) break;
+    await new Promise<void>((resolve) => { server.close(() => { resolve(); }); });
+  }
+  if (address === null || typeof address === 'string' || !isFetchSafeLoopbackPort(address.port)) {
+    throw new ProviderAuthError('token-request-failed', '无法在 127.0.0.1 上取得浏览器允许的回调端口');
   }
 
   const timer = setTimeout(() => {

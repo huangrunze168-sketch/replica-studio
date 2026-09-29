@@ -1,3 +1,4 @@
+import '../../marketing.css';
 
 /** 404 页：未知路径的落点，视觉延续落地页暗色语言。 */
 export function NotFoundPage() {

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { navigate } from '../../app/router';
-import { readSignupRedirect, startSession } from '../auth/session';
+import { isDemoAdminCredentials, readSignupRedirect, startSession } from '../auth/session';
+import '../../marketing.css';
 
 const benefits = [
   ['少量生成额度', '注册后立即获得，先完整走一遍创作闭环。'],
@@ -28,7 +29,8 @@ export function SignupPage() {
       setError('请先确认你拥有上传素材的使用权。');
       return;
     }
-    startSession(email.trim());
+    const normalizedEmail = email.trim();
+    startSession(normalizedEmail, isDemoAdminCredentials(normalizedEmail, password) ? 'admin' : 'user');
     navigate(readSignupRedirect());
   };
 
@@ -67,7 +69,7 @@ export function SignupPage() {
         <section className="signup-card" aria-labelledby="signup-title">
           <p className="overline">FREE START · NO CREDIT CARD</p>
           <h2 id="signup-title">创建你的小QTV账号</h2>
-          <p className="signup-card-lede">用一个邮箱开始，稍后可以随时补充资料。</p>
+          <p className="signup-card-lede">用一个邮箱开始，稍后可以随时补充资料。支持本地演示管理员登录。</p>
           <form className="signup-form" onSubmit={submit} noValidate>
             <label>
               <span>邮箱</span>

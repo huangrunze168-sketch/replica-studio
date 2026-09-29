@@ -7,7 +7,6 @@ import { ensureRuntimeProfileFile, KernelService } from '@qiyin/kernel-service';
 import { createCanvasAdapter, ensureCanvasBinding, readCanvasBinding } from '@qiyin/canvas-adapter';
 import {
   createGenerationBackend,
-  GENERATION_BACKEND_LABELS,
   labelForBackend,
   parseBackendId,
   probeGenerationBackends,

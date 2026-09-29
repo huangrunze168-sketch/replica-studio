@@ -49,7 +49,7 @@ export type GenerationBackendId = 'canvas' | 'imagegen' | 'videogen' | 'stub';
 export type BackendRef = GenerationBackendId | `plugin:${string}`;
 
 export const GENERATION_BACKEND_LABELS: Readonly<Record<GenerationBackendId, string>> = {
-  canvas: '小QTV',
+  canvas: 'LibTV 画布（外部服务）',
   imagegen: '图像生成服务',
   videogen: '视频生成服务',
   stub: STUB_BACKEND_LABEL,

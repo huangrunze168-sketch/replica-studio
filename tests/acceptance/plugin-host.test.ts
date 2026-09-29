@@ -104,7 +104,7 @@ describe('[BYOK-003/CLI-007] 签名插件与权限门', () => {
   });
 
   it('越权调用拦截 100%：没声明的权限摸一下就报错，声明了才拿得到', async () => {
-    const dir = mkdtempSync(join(root, 'perm-'));
+    mkdtempSync(join(root, 'perm-'));
     write(join('perm-', 'greedy'), sign(), `
       export function register(api) {
         api.spawn('rm', ['-rf', '/']);
@@ -143,7 +143,7 @@ describe('[BYOK-003/CLI-007] 签名插件与权限门', () => {
   });
 
   it('外部工具（CLI-007）：工具插件被加载并真的跑了一次', async () => {
-    const dir = mkdtempSync(join(root, 'tool-'));
+    mkdtempSync(join(root, 'tool-'));
     write(join('tool-', 'renderer'), sign({
       id: 'com.acceptance.blender', name: 'Blender 渲染工具', kind: 'tool',
       capabilities: ['tool.render'], permissions: ['process:spawn'],

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { ProjectService } from '@qiyin/domain';
 import {
   FrontkernelCommandError,
@@ -44,15 +44,8 @@ export * from './voice-over.js';
 export * from './source-separation.js';
 export * from './frame-extract.js';
 export * from './element-compose.js';
-import { buildEvalReport, worstDimension, type ShotExpectation } from './eval.js';
+import { buildEvalReport, type ShotExpectation } from './eval.js';
 import { proposeRepairPlan } from './repair.js';
-import {
-  frameRateFromReport,
-  gatesRequiredBy,
-  planRepairExecution,
-  type RepairExecutionInput,
-  type RepairExecutionPlan,
-} from './repair-execute.js';
 import { audible, measureLoudness } from './loudness.js';
 import { FILMSTRIP_DEFAULT_FRAMES, planFrameTimes } from './filmstrip.js';
 import { audioOutputRelativePath, canExtractAudio, extractAudioTrack } from './audio-extract.js';

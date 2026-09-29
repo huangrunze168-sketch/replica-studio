@@ -6,10 +6,10 @@
      我们只负责：起进程、把它的输出流回来、能中止、把日志留档。
 
    这么做的直接好处是**我们不经手任何凭据**：
-   agent 的账号、模型、额度全在它自己的配置里（`~/.codex/config.toml`、
+   agent 的账号、模型、额度全在它自己的配置里（DSH Profile、`~/.codex/config.toml`、
    `~/.claude/*`）。软件既不读、也不存、更不转发这些密钥。
 
-   支持两路：codex（`codex exec --json`）与 claude（`claude -p --output-format stream-json`）。
+   默认走 DSH（`dsh --profile headless --json -`）；同时保留 codex、claude 与 Hermes 兼容入口。
 
    一个**刻意不做**的事：不用 `codex login status` 判断可用性。
    实测它只看 OpenAI 官方账号，而本机 codex 走的是自定义 provider
@@ -38,9 +38,9 @@ import type { ToolWaiting } from './agent-tool-copy.js';
  *
  * `builtin` 是**程序自己内置**的那一路（agent-builtin.ts）：不要用户装任何 CLI，
  * 只要填一个 OpenAI 兼容的端点就能用——这一条对应 小QTV 那种"开箱自带 agent"。
- * 另外三路是外部的 CLI：codex / claude 走 JSONL，hermes 走 ACP。
+ * 外部 CLI 中，DSH / codex / claude 走 JSONL，hermes 走 ACP。
  */
-export type AgentId = 'builtin' | 'codex' | 'claude' | 'hermes';
+export type AgentId = 'builtin' | 'dsh' | 'codex' | 'claude' | 'hermes';
 
 /**
  * codex 的沙箱模式。
@@ -54,7 +54,7 @@ export type AgentId = 'builtin' | 'codex' | 'claude' | 'hermes';
  * 这时只有两个选择：功能不可用，或者用户明确同意去掉隔离。
  * 我们**不替用户选**：默认保持隔离，失败时把话说清楚，由用户显式改。
  */
-export type AgentSandbox = 'workspace-write' | 'danger-full-access';
+export type AgentSandbox = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 export interface AgentDescriptor {
   id: AgentId;
@@ -132,6 +132,7 @@ export interface AgentRunHandle {
  * 这是我们必须避免的注入面。
  */
 const CANDIDATES: Record<AgentId, readonly string[]> = {
+  dsh: ['dsh'],
   codex: ['C:\\Tools\\codex\\codex.exe', 'codex'],
   claude: [
     join(process.env.APPDATA ?? '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
@@ -151,6 +152,7 @@ const CANDIDATES: Record<AgentId, readonly string[]> = {
 
 const LABELS: Record<AgentId, string> = {
   builtin: '小QTV 内置',
+  dsh: 'DeepSeek Harness',
   codex: 'Codex CLI',
   claude: 'Claude Code',
   hermes: 'Hermes Agent',
@@ -158,6 +160,7 @@ const LABELS: Record<AgentId, string> = {
 
 const ACCOUNTS: Record<AgentId, string> = {
   builtin: '用你自己填的模型端点（key 存在本机）',
+  dsh: '使用本机 DeepSeek Harness 配置与订阅',
   codex: '用你自己的 Codex 账号/服务商额度',
   claude: '用你自己的 Claude 账号额度',
   hermes: '用本机 Hermes 自己的模型与账号',
@@ -166,13 +169,11 @@ const ACCOUNTS: Record<AgentId, string> = {
 /** 跑一次 `--version`，能出来就说明这条路可用；顺带把版本号记下来。 */
 function probe(command: string, args: readonly string[]): string | null {
   try {
-    const result = spawnSync(command, [...args], {
+    const needsWindowsLauncher = process.platform === 'win32' && !command.includes('\\');
+    const result = spawnSync(needsWindowsLauncher ? (process.env.ComSpec ?? 'cmd.exe') : command, needsWindowsLauncher ? ['/d', '/s', '/c', command, ...args] : [...args], {
       encoding: 'utf8',
       timeout: 15_000,
       windowsHide: true,
-      /* Windows 上裸命令（.cmd/.ps1）需要 shell 才能解析；这里只用于探测版本，
-         参数是我们写死的，不接受任何用户输入，所以这个 shell 不构成注入面。 */
-      shell: process.platform === 'win32' && !command.includes('\\'),
     });
     if (result.status !== 0) return null;
     const text = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
@@ -205,6 +206,7 @@ export function detectAgents(): AgentDescriptor[] {
 }
 
 function argsFor(id: AgentId, prompt: string, sandbox: AgentSandbox, images: readonly string[]): string[] {
+  if (id === 'dsh') return ['--profile', 'headless', '--json', '-'];
   if (id === 'codex') {
     /*
       `--json` 让 codex 按 JSONL 逐事件输出，这是我们能把「它正在干什么」实时画出来的前提。
@@ -253,7 +255,7 @@ export interface AgentEventExtra {
  *     （只写 server 的话，同一个 server 下的调用看起来都一样）；
  *   · 认不出的类型**原样报类型名**，不硬塞进某一类。
  */
-export function describeToolCall(item: Record<string, unknown>): { text: string; kind: string } {
+function describeToolCall(item: Record<string, unknown>): { text: string; kind: string } {
   const itemType = String(item.type ?? 'tool');
   const shorten = (value: unknown, limit = 120): string => {
     const text = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -285,7 +287,31 @@ export function describeToolCall(item: Record<string, unknown>): { text: string;
   return { kind: itemType, text: shorten(item.path ?? item.message ?? itemType) };
 }
 
-/** codex 的 JSONL 事件 → 我们能画的东西。导出是为了单测能直接钉住协议解析。 */
+/** 模型服务可能把错误包在字符串 JSON 里，再包在 turn.failed.error 中。 */
+export function formatAgentFailure(raw: unknown): string {
+  let value: unknown = raw;
+  for (let depth = 0; depth < 5; depth++) {
+    if (typeof value === 'string' && value.trim().startsWith('{')) {
+      try { value = JSON.parse(value) as unknown; continue; } catch { break; }
+    }
+    if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      const next = record.error ?? record.message;
+      if (next !== undefined && next !== value) { value = next; continue; }
+    }
+    break;
+  }
+  const text = typeof value === 'string' ? value : '';
+  const outdated = /['`‘]([^'`’]+)['`’] model requires a newer version of Codex/i.exec(text);
+  if (outdated) return `本机 Codex CLI 版本过旧，无法使用当前模型 ${outdated[1]}。请更新 Codex CLI，或在 Codex 配置中选择兼容模型后重试。`;
+  if (/model.*(not found|does not exist|unsupported)/i.test(text)) return '当前配置的模型不可用，请检查 Agent 模型配置后重试。';
+  if (/unauthori[sz]ed|invalid.*api.?key|authentication_failed|not logged in|\b401\b/i.test(text)) return '模型服务未授权，请检查 Agent 登录状态或模型服务凭据。';
+  if (/rate.limit|too many requests|\b429\b/i.test(text)) return '模型服务请求过于频繁，请稍后重试。';
+  if (/context.length|context.window|too many tokens/i.test(text)) return '对话超过模型上下文限制，请新建对话并缩短请求。';
+  return 'Agent 本轮运行失败，请检查模型服务与 Agent 配置后重试。';
+}
+
+/** codex 的 JSONL 事件 → 结构化回复／工具／失败，不能把日志当正文。 */
 export function parseCodexLine(
   line: string,
   emit: (kind: AgentEventKind, text: string, usage?: Record<string, unknown>, extra?: AgentEventExtra) => void,
@@ -298,16 +324,13 @@ export function parseCodexLine(
   }
   const type = String(payload.type ?? '');
 
-  if (type === 'thread.started') {
-    emit('note', `会话已建立：${String(payload.thread_id ?? '')}`);
-    return true;
-  }
+  if (type === 'thread.started') return true;
   if (type === 'turn.failed' || type === 'error') {
-    emit('error', String((payload.message as string) ?? JSON.stringify(payload)));
+    emit('error', formatAgentFailure(payload.error ?? payload.message ?? payload));
     return true;
   }
   if (type === 'turn.completed') {
-    emit('done', '本轮结束', (payload.usage as Record<string, unknown>) ?? undefined);
+    // CLI 未退出前不能提前宣布完成；最终 done 在 child.close 发送。
     return true;
   }
   if (type !== 'item.completed' && type !== 'item.updated' && type !== 'item.started') return true;
@@ -345,7 +368,7 @@ export function parseCodexLine(
     return true;
   }
   if (itemType === 'error') {
-    emit('error', String(item.message ?? ''));
+    // Codex 的 item.error 还承载模型元数据／技能预算警告；终止失败以 turn.failed 为准。
     return true;
   }
   /*
@@ -367,6 +390,62 @@ export function parseCodexLine(
   return true;
 }
 
+/** DSH headless --json 事件 → 小QTV 对话流。 */
+export function parseDshLine(
+  line: string,
+  emit: (kind: AgentEventKind, text: string, usage?: Record<string, unknown>, extra?: AgentEventExtra) => void,
+): boolean {
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return false;
+  }
+  const type = String(payload.type ?? '');
+  if (type === 'session' || type === 'status') return true;
+  if (type === 'thinking') {
+    const text = String(payload.text ?? '').trim();
+    if (text) emit('reasoning', text.slice(0, 800));
+    return true;
+  }
+  if (type === 'text') {
+    const text = String(payload.text ?? '').trim();
+    if (text) emit('message', text);
+    return true;
+  }
+  if (type === 'final') {
+    // DSH 会在 text 事件后再发送完整 final；忽略它，避免正文重复两次。
+    return true;
+  }
+  if (type === 'tool_call') {
+    const input = (payload.input ?? {}) as Record<string, unknown>;
+    const label = typeof input.description === 'string' && input.description.trim()
+      ? input.description.trim()
+      : `调用 ${String(payload.tool ?? '工具')}`;
+    emit('tool', label, undefined, {
+      ...(typeof payload.callId === 'string' ? { itemId: payload.callId } : {}),
+      phase: 'start',
+      toolKind: String(payload.tool ?? 'dsh_tool'),
+    });
+    return true;
+  }
+  if (type === 'tool_result') {
+    const status = String(payload.status ?? 'completed');
+    emit('tool', /^(failed|error)$/i.test(status) ? '工具调用失败' : '工具调用完成', undefined, {
+      ...(typeof payload.callId === 'string' ? { itemId: payload.callId } : {}),
+      phase: 'done',
+      toolKind: 'dsh_tool',
+      failed: /^(failed|error)$/i.test(status),
+    });
+    return true;
+  }
+  if (type === 'error') {
+    emit('error', formatAgentFailure(payload.error ?? payload.message ?? payload));
+    return true;
+  }
+  return true;
+}
+
 /** claude 的 stream-json 事件 → 我们能画的东西（未在本机验证，见 argsFor 的说明） */
 export function parseClaudeLine(
   line: string,
@@ -379,10 +458,7 @@ export function parseClaudeLine(
     return false;
   }
   const type = String(payload.type ?? '');
-  if (type === 'system') {
-    emit('note', `会话已建立：${String(payload.session_id ?? '')}`);
-    return true;
-  }
+  if (type === 'system') return true;
   if (type === 'assistant') {
     const message = (payload.message ?? {}) as {
       content?: Array<{ type?: string; text?: string; name?: string; thinking?: string }>;
@@ -566,6 +642,10 @@ export function startAgentRun(options: {
     return { runId, cancel: handle.cancel };
   }
 
+  let sawReply = false;
+  let sawFailure = false;
+  let cancelled = false;
+  const failures = new Set<string>();
   const emit = (
     kind: AgentEventKind,
     text: string,
@@ -573,6 +653,12 @@ export function startAgentRun(options: {
     extra?: AgentEventExtra,
   ) => {
     if (text.trim() === '' && kind !== 'done') return;
+    if (kind === 'message') sawReply = true;
+    if (kind === 'error') {
+      if (failures.has(text)) return;
+      failures.add(text);
+      sawFailure = true;
+    }
     options.onEvent({
       runId,
       kind,
@@ -598,7 +684,11 @@ export function startAgentRun(options: {
   let child: ChildProcessWithoutNullStreams;
   try {
     const images = options.agentId === 'codex' ? (options.images ?? []) : [];
-    child = spawn(options.command, argsFor(options.agentId, options.prompt, options.sandbox ?? 'workspace-write', images), {
+    const cliArgs = argsFor(options.agentId, options.prompt, options.sandbox ?? 'workspace-write', images);
+    const useWindowsDshLauncher = options.agentId === 'dsh' && process.platform === 'win32';
+    const spawnCommand = useWindowsDshLauncher ? (process.env.ComSpec ?? 'cmd.exe') : options.command;
+    const spawnArgs = useWindowsDshLauncher ? ['/d', '/s', '/c', options.command, ...cliArgs] : cliArgs;
+    child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd,
       windowsHide: true,
       /* 不经 shell：提示词里的 & | > 之类的字符不会被当成命令 */
@@ -626,15 +716,25 @@ export function startAgentRun(options: {
 
     现在这里承载项目简报：有就写进去，没有就空管道，两种情况都立刻 end()。
   */
-  if (options.context !== undefined && options.context.trim() !== '') {
+  if (options.agentId === 'dsh') {
+    const sections = [options.prompt];
+    if (options.context?.trim()) sections.push(`\n\n以下是小QTV 提供的项目事实与约束，请据此工作：\n${options.context}`);
+    if (options.images?.length) sections.push(`\n\n可读取的参考图片路径：\n${options.images.join('\n')}`);
+    const task = sections.join('');
+    child.stdin.write(task);
+    log('prompt', task);
+  } else if (options.context !== undefined && options.context.trim() !== '') {
     child.stdin.write(options.context);
     /* 补进去的上下文也进留档：将来要解释"它为什么这么说"，这是唯一的第一手材料 */
     log('context', options.context);
   }
   child.stdin.end();
 
+  const fragments: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
   const readLine = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
-    for (const raw of chunk.toString('utf8').split(/\r?\n/)) {
+    const lines = (fragments[stream] + chunk.toString('utf8')).split(/\r?\n/);
+    fragments[stream] = lines.pop() ?? '';
+    for (const raw of lines) {
       const line = raw.trim();
       if (line === '') continue;
       log(stream, line);
@@ -652,10 +752,11 @@ export function startAgentRun(options: {
       if (isProtocolLine(line)) {
         const handled = options.agentId === 'codex'
           ? parseCodexLine(line, emit)
-          : parseClaudeLine(line, emit);
+          : options.agentId === 'dsh'
+            ? parseDshLine(line, emit)
+            : parseClaudeLine(line, emit);
         if (handled) continue;
-        /* 长得像 JSON 但解析不了：落成备注，不当噪声扔掉 */
-        emit('note', line);
+        /* 损坏的协议行只保留在运行日志，不能当作 Agent 正文。 */
         continue;
       }
 
@@ -679,12 +780,8 @@ export function startAgentRun(options: {
         }
         continue;
       }
-      if (stream === 'stderr') {
-        if (!isNoise) emit('note', line);
-        continue;
-      }
-      /* 非 JSON 行是 CLI 的普通提示，照实带出来 */
-      if (!isNoise) emit('note', line);
+      // stderr 与 stdout 的非协议行是 CLI 运维日志，留档但不显示为助手发言。
+      if (!isNoise) continue;
     }
   };
 
@@ -696,13 +793,19 @@ export function startAgentRun(options: {
   });
 
   child.on('close', (code) => {
-    if (code === 0) emit('done', '运行结束');
-    else emit('done', `进程退出，退出码 ${code ?? '未知'}`);
+    for (const stream of ['stdout', 'stderr'] as const) {
+      if (fragments[stream]) readLine(stream)(Buffer.from('\n'));
+    }
+    if (cancelled && !sawFailure) emit('error', '本轮已停止，未生成完成结果。');
+    else if (!sawFailure && code !== 0) emit('error', 'Agent 本轮运行失败，请检查 Agent 配置与运行环境后重试。');
+    else if (!sawReply && !sawFailure) emit('error', 'Agent 本轮未返回可显示的回复，请检查 Agent 配置后重试。');
+    emit('done', '运行结束');
   });
 
   return {
     runId,
     cancel: () => {
+      cancelled = true;
       /* 连子进程一起收：agent 会自己再起子进程，只 kill 顶层会留孤儿 */
       if (process.platform === 'win32' && child.pid !== undefined) {
         spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  BACKGROUND_REMOVAL_CAPABILITY, BackgroundRemovalProvider, BackgroundRemovalProviderError,
+  BACKGROUND_REMOVAL_CAPABILITY, BackgroundRemovalProvider,
   assertBackgroundRemovalSource, isTransparentPng, type BackgroundRemovalRunner,
 } from '../packages/background-removal-provider/src/index.js';
 

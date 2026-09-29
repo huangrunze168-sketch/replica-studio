@@ -190,6 +190,23 @@ describe('上限与裁剪', () => {
     expect(pruned.messages[0]?.text).toContain('7 条');
   });
 
+  it('长期创作裁剪保留现行方案、批准、选帧和逐镜产物，版本连续递增', () => {
+    const dir = workspace();
+    const foundation: StoredMessage[] = [
+      { id: 'plan-current', role: 'plan', text: '{"kind":"plan"}' },
+      { id: 'approval-current', role: 'approval', text: 'plan-current' },
+      { id: 'frame-current', role: 'selection', text: '{"shotId":"shot-01","artifactId":"sha256:abc"}' },
+      { id: 'image-current', role: 'asset', text: '{"shotId":"shot-01","kind":"image"}' },
+      { id: 'video-current', role: 'asset', text: '{"shotId":"shot-01","kind":"video"}' },
+    ];
+    const old = saveSession(dir, { messages: [...foundation, ...Array.from({ length: 215 }, (_, index) => ({ id: `activity-${index}`, role: 'tool' as const, text: `日志 ${index}` }))] });
+    expect(old.messages.length).toBeLessThanOrEqual(MESSAGE_LIMIT + 1);
+    for (const anchor of foundation) expect(old.messages.some(item => item.id === anchor.id)).toBe(true);
+    const next = saveSession(dir, { id: old.id, messages: [...old.messages, { id: 'latest', role: 'agent', text: '继续创作' }] });
+    expect(next.trimmed + next.messages.length).toBe(old.trimmed + old.messages.length + 1);
+    for (const anchor of foundation) expect(readSession(dir, next.id)!.messages.some(item => item.id === anchor.id)).toBe(true);
+  });
+
   it('会话数量超过上限时，旧的被清掉', () => {
     const dir = workspace();
     let last = '';

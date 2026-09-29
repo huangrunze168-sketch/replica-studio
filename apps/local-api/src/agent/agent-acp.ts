@@ -30,7 +30,7 @@ import { readFileSync } from 'node:fs';
 import type { AgentEventKind } from './agent-runner.js';
 
 /** 映射结果：一条 ACP 事件 → 我们面板的一种事件 */
-export interface AcpMapped {
+interface AcpMapped {
   kind: AgentEventKind;
   text: string;
   itemId?: string;
@@ -63,7 +63,7 @@ function textOfContent(content: unknown): string {
  * 认不出的 `sessionUpdate` 一律返回 null（**不瞎猜**）：
  * ACP 还在长，多出来的类型画成"某某更新"只会污染对话。
  */
-export function mapAcpUpdate(update: Record<string, unknown>): AcpMapped | null {
+function mapAcpUpdate(update: Record<string, unknown>): AcpMapped | null {
   const kind = String(update.sessionUpdate ?? '');
   if (kind === 'agent_message_chunk') {
     const text = textOfContent(update.content);
@@ -105,7 +105,7 @@ export function mapAcpUpdate(update: Record<string, unknown>): AcpMapped | null 
 }
 
 /** `session/prompt` 的响应 → 结束事件（带这一轮的用量） */
-export function mapAcpPromptResult(result: Record<string, unknown>): AcpMapped {
+function mapAcpPromptResult(result: Record<string, unknown>): AcpMapped {
   const usage = (result.usage ?? {}) as Record<string, unknown>;
   const stop = String(result.stopReason ?? '');
   return {
@@ -168,7 +168,6 @@ export function startAcpRun(options: StartAcpRunOptions): AcpRunHandle {
   let buffer = '';
   let finished = false;
   let sessionId: string | null = null;
-  let promptId: number | null = null;
 
   const finish = (message: string) => {
     if (finished) return;
@@ -277,7 +276,6 @@ export function startAcpRun(options: StartAcpRunOptions): AcpRunHandle {
       }
       prompt.push({ type: 'text', text: options.prompt });
       const id = nextId++;
-      promptId = id;
       const result = await new Promise<Record<string, unknown>>((resolve, reject) => {
         pending.set(id, { resolve, reject });
         send({ id, method: 'session/prompt', params: { sessionId, prompt } });

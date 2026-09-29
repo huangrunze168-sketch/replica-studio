@@ -4,11 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@qiyin/contracts": "workspace:*",
+    "@qiyin/canvas-adapter": "workspace:*",
     "@qiyin/domain": "workspace:*",
     "@qiyin/frontkernel-adapter": "workspace:*",
-    "@qiyin/kernel-service": "workspace:*",
-    "@qiyin/canvas-adapter": "workspace:*",
-    "@qiyin/generation-service": "workspace:*"
+    "@qiyin/generation-service": "workspace:*",
+    "@qiyin/kernel-service": "workspace:*"
   }
 }

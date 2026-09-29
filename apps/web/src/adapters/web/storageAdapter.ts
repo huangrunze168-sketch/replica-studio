@@ -1,4 +1,4 @@
-import type { AppPorts, Asset, GenerationJob, GenerationPort, MediaPort, ProjectCreateInput, ProjectPort, ProjectSummary, ReferenceSource, Shot, ShotPort, SourcePort } from '../../ports/index.js';
+import type { AppPorts, Asset, CanvasDocumentPort, GenerationJob, GenerationPort, MediaPort, PersistedCanvasDocument, ProjectCreateInput, ProjectPort, ProjectSummary, ReferenceSource, Shot, ShotPort, SourcePort, WorkspaceDetail, WorkspacePort, WorkspaceSummary } from '../../ports/index.js';
 import { memoryAdapter } from './memoryAdapter.js';
 
 /**
@@ -24,10 +24,11 @@ async function hydrate(): Promise<ProjectSummary[]> {
   if (projects) return projects;
   const stored = readStore();
   if (stored) {
-    projects = stored;
+    projects = stored.map(project => ({ ...project, workspaceId: project.workspaceId || `legacy-${project.id}` }));
+    persist();
     return projects;
   }
-  const [active, archived] = await Promise.all([memoryAdapter.projects.list(), memoryAdapter.projects.listArchived()]);
+  const [active, archived] = await Promise.all([memoryAdapter.canvases.list(), memoryAdapter.canvases.listArchived()]);
   projects = [...active, ...archived];
   persist();
   return projects;
@@ -95,13 +96,19 @@ const shotPort: ShotPort = {
   },
 };
 
-const projectPort: ProjectPort = {
-  list: async () => (await hydrate()).filter(project => project.status === 'active'),
+const canvasPort: ProjectPort = {
+  list: async workspaceId => (await hydrate()).filter(project => project.status === 'active' && (!workspaceId || project.workspaceId === workspaceId)),
   listArchived: async () => (await hydrate()).filter(project => project.status === 'archived'),
   get: async id => (await hydrate()).find(project => project.id === id),
   create: async (input: ProjectCreateInput) => {
-    const created = await memoryAdapter.projects.create(input);
+    const spaces = await hydrateWorkspaces();
+    const workspaceId = input.workspaceId ?? `w-${crypto.randomUUID()}`;
+    const created: ProjectSummary = { id: `p-${crypto.randomUUID()}`, workspaceId, name: input.name, description: input.description, updatedAt: '刚刚', status: 'active', shots: 0, assets: 0, progress: 0, revision: 1, state: 'EMPTY', maxBudgetCents: input.maxBudgetCents ?? 0, rightsConfirmed: input.rightsConfirmed ?? false };
     (await hydrate()).unshift(created);
+    const workspace = spaces.find(item => item.id === workspaceId);
+    if (workspace) { workspace.canvasCount += 1; workspace.updatedAt = '刚刚'; workspace.revision += 1; }
+    else spaces.unshift({ id: workspaceId, name: input.workspaceName ?? input.name, description: '新工作区 · 1 张画布', updatedAt: '刚刚', status: 'active', revision: 1, canvasCount: 1, primaryProjectId: created.id, shots: 0, assets: 0, progress: 0, state: 'EMPTY', maxBudgetCents: 0, rightsConfirmed: false });
+    persistWorkspaces();
     persist();
     return created;
   },
@@ -156,6 +163,53 @@ const projectPort: ProjectPort = {
     persist();
     return project;
   },
+};
+
+const WORKSPACES_KEY = 'qiyin.workspaces.v1';
+let workspaceStore: WorkspaceSummary[] | null = null;
+async function hydrateWorkspaces(): Promise<WorkspaceSummary[]> {
+  if (workspaceStore) return workspaceStore;
+  if (typeof window !== 'undefined') {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(WORKSPACES_KEY) ?? 'null') as WorkspaceSummary[] | null;
+      if (Array.isArray(parsed)) { workspaceStore = parsed; return workspaceStore; }
+    } catch { /* 使用演示数据播种 */ }
+  }
+  const canvases = await hydrate();
+  const [seedActive, seedArchived] = await Promise.all([memoryAdapter.workspaces.list(), memoryAdapter.workspaces.listArchived()]);
+  const seeds = new Map([...seedActive, ...seedArchived].map(workspace => [workspace.id, workspace]));
+  const grouped = new Map<string, ProjectSummary[]>();
+  for (const canvas of canvases) grouped.set(canvas.workspaceId, [...(grouped.get(canvas.workspaceId) ?? []), canvas]);
+  workspaceStore = [...grouped.entries()].map(([id, items]) => {
+    const seed = seeds.get(id);
+    const primary = items[0]!;
+    return seed ?? { id, name: primary.name, description: `${items.length} 张画布`, updatedAt: primary.updatedAt, status: primary.status, revision: primary.revision, canvasCount: items.length, primaryProjectId: primary.id, shots: items.reduce((sum, canvas) => sum + canvas.shots, 0), assets: items.reduce((sum, canvas) => sum + canvas.assets, 0), progress: primary.progress, state: primary.state, maxBudgetCents: primary.maxBudgetCents, rightsConfirmed: primary.rightsConfirmed };
+  });
+  persistWorkspaces();
+  return workspaceStore;
+}
+function persistWorkspaces(): void {
+  if (typeof window === 'undefined' || !workspaceStore) return;
+  try { window.localStorage.setItem(WORKSPACES_KEY, JSON.stringify(workspaceStore)); } catch { /* 降级为内存态 */ }
+}
+async function workspaceDetail(workspace: WorkspaceSummary): Promise<WorkspaceDetail> {
+  return { ...workspace, canvases: (await hydrate()).filter(canvas => canvas.workspaceId === workspace.id) };
+}
+const workspacePort: WorkspacePort = {
+  list: async () => (await hydrateWorkspaces()).filter(item => item.status === 'active'),
+  listArchived: async () => (await hydrateWorkspaces()).filter(item => item.status === 'archived'),
+  get: async id => { const item = (await hydrateWorkspaces()).find(workspace => workspace.id === id); return item ? workspaceDetail(item) : undefined; },
+  create: async (name = '未命名工作区') => {
+    const stamp = Date.now();
+    const workspace: WorkspaceSummary = { id: `w-${stamp}`, name, description: '新工作区 · 1 张画布', updatedAt: '刚刚', status: 'active', revision: 1, canvasCount: 1, primaryProjectId: `p-${stamp}`, shots: 0, assets: 0, progress: 0, state: 'EMPTY', maxBudgetCents: 0, rightsConfirmed: false };
+    const project: ProjectSummary = { id: `p-${stamp}`, workspaceId: workspace.id, name: '画布 1', description: '', updatedAt: '刚刚', status: 'active', shots: 0, assets: 0, progress: 0, revision: 1, state: 'EMPTY', maxBudgetCents: 0, rightsConfirmed: false };
+    (await hydrateWorkspaces()).unshift(workspace); (await hydrate()).unshift(project); persistWorkspaces(); persist();
+    return { workspace: await workspaceDetail(workspace), project };
+  },
+  rename: async (id, name) => { const item = (await hydrateWorkspaces()).find(workspace => workspace.id === id); if (!item) throw new Error('工作区不存在'); item.name = name.trim(); item.revision += 1; item.updatedAt = '刚刚'; persistWorkspaces(); return workspaceDetail(item); },
+  trash: async id => { const item = (await hydrateWorkspaces()).find(workspace => workspace.id === id); if (!item) throw new Error('工作区不存在'); item.status = 'archived'; item.revision += 1; item.updatedAt = '刚刚'; (await hydrate()).filter(canvas => canvas.workspaceId === id).forEach(canvas => { canvas.status = 'archived'; }); persistWorkspaces(); persist(); return workspaceDetail(item); },
+  restore: async id => { const item = (await hydrateWorkspaces()).find(workspace => workspace.id === id); if (!item) throw new Error('工作区不存在'); item.status = 'active'; item.revision += 1; item.updatedAt = '刚刚'; (await hydrate()).filter(canvas => canvas.workspaceId === id).forEach(canvas => { canvas.status = 'active'; }); persistWorkspaces(); persist(); return workspaceDetail(item); },
+  purge: async id => { const spaces = await hydrateWorkspaces(); const index = spaces.findIndex(item => item.id === id); if (index >= 0) spaces.splice(index, 1); projects = (await hydrate()).filter(canvas => canvas.workspaceId !== id); persistWorkspaces(); persist(); },
 };
 
 /* ---- assets / sources / jobs：与 shots 同款的按项目键控持久化 ---- */
@@ -252,6 +306,9 @@ const mediaPort: MediaPort = {
     }
     return assetsStore[projectId];
   },
+  upload: () => Promise.reject(new Error('本地 API 未连接，无法上传真实素材。')),
+  rate: async (projectId, artifactId, stars) => { if (!assetsStore) assetsStore = readBuckets(ASSETS_KEY); const asset = assetsStore[projectId]?.find(item => item.id === artifactId); if (asset) { if (stars) asset.rating = stars; else delete asset.rating; writeBuckets(ASSETS_KEY, assetsStore); } },
+  remove: async (projectId, artifactId) => { if (!assetsStore) assetsStore = readBuckets(ASSETS_KEY); assetsStore[projectId] = (assetsStore[projectId] ?? []).filter(item => item.id !== artifactId); writeBuckets(ASSETS_KEY, assetsStore); },
 };
 
 const sourcePort: SourcePort = {
@@ -273,6 +330,30 @@ const sourcePort: SourcePort = {
   },
 };
 
+const canvasDocumentPort: CanvasDocumentPort = {
+  load: async projectId => {
+    const project = (await hydrate()).find(item => item.id === projectId);
+    if (!project) throw new Error('项目不存在');
+    let document: PersistedCanvasDocument | null = null;
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(`qiyin.canvas.v2.${projectId}`) ?? 'null') as PersistedCanvasDocument | null;
+      if (parsed?.version === 2 && Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) document = parsed;
+    } catch { /* 损坏的恢复草稿不覆盖项目 */ }
+    return { document, projectRevision: project.revision, documentRevision: document ? project.revision : null };
+  },
+  save: async (projectId, expectedProjectRevision, document) => {
+    const project = (await hydrate()).find(item => item.id === projectId);
+    if (!project) throw new Error('项目不存在');
+    if (project.revision !== expectedProjectRevision) throw new Error('画布已在其他位置更新，请重新载入。');
+    try { window.localStorage.setItem(`qiyin.canvas.v2.${projectId}`, JSON.stringify(document)); }
+    catch { throw new Error('本地空间不足，画布尚未保存。'); }
+    project.revision += 1;
+    project.updatedAt = '刚刚';
+    persist();
+    return { projectRevision: project.revision, documentRevision: project.revision };
+  },
+};
+
 const generationPort: GenerationPort = {
   listJobs: async projectId => {
     if (!jobsStore) jobsStore = readBuckets(JOBS_KEY);
@@ -290,11 +371,14 @@ const generationPort: GenerationPort = {
     writeBuckets(JOBS_KEY, jobsStore);
     return job;
   },
+  status: () => Promise.reject(new Error('本地 API 未连接，无法核查真实生成任务。')),
 };
 
 export const storageAdapter: AppPorts = {
   ...memoryAdapter,
-  projects: projectPort,
+  workspaces: workspacePort,
+  canvases: canvasPort,
+  canvasDocuments: canvasDocumentPort,
   shots: shotPort,
   media: mediaPort,
   source: sourcePort,

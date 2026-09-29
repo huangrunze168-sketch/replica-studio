@@ -23,9 +23,10 @@ export function resolveCanvasExecutable(explicit?: string): string {
   if (fromEnv) candidates.push(fromEnv);
   const home = process.env.USERPROFILE ?? process.env.HOME;
   if (home) {
-    candidates.push(join(home, '.canvas', 'canvas.exe'), join(home, '.canvas', 'canvas'));
-    // 兼容旧安装目录与旧可执行名
+    // LibTV CLI 1.1.3 的官方用户级安装路径优先。
     candidates.push(join(home, '.libtv', 'libtv.exe'), join(home, '.libtv', 'libtv'));
+    // 兼容早期内部开发版的目录与可执行名。
+    candidates.push(join(home, '.canvas', 'canvas.exe'), join(home, '.canvas', 'canvas'));
   }
 
   for (const candidate of candidates) {

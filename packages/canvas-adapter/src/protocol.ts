@@ -66,7 +66,8 @@ export interface CanvasModelSchemaResult {
     modelName?: string;
     modelVendor?: string;
     properties?: Record<string, CanvasModelProperty>;
-    config?: { settings?: Record<string, string[]> };
+    config?: { settings?: string[] | Record<string, string[]>; advancedSettings?: string[]; generateTypes?: Record<string, unknown> };
+    rules?: unknown[];
   };
 }
 
@@ -124,7 +125,9 @@ export function modeInputRange(result: CanvasModelSchemaResult, modeType: string
 
 /** 这个模式下界面上会出现的参数名（`config.settings[mode]`）。查不到就返回空数组。 */
 export function settingsForMode(result: CanvasModelSchemaResult, modeType: string): string[] {
-  return result.schema?.config?.settings?.[modeType] ?? [];
+  const settings = result.schema?.config?.settings;
+  if (Array.isArray(settings)) return settings;
+  return settings?.[modeType] ?? [];
 }
 
 export interface CanvasNodeResult {

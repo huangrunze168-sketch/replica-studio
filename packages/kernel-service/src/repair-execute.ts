@@ -1,4 +1,4 @@
-import type { RepairOperation, RepairOperationKind, RepairPlan } from '@qiyin/contracts';
+import type { RepairOperationKind, RepairPlan } from '@qiyin/contracts';
 import { quantizeToFrames } from './eval.js';
 
 /* ============================================================

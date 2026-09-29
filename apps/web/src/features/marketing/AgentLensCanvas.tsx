@@ -178,7 +178,7 @@ const LENS_FRAGMENT_SHADER = `
 				}
 			`;
 
-type AgentLensCanvasProps = {
+export type AgentLensCanvasProps = {
   promptRef?: RefObject<HTMLElement | null>;
   /** 是否在视口内；false 时完全停渲染（省电）。 */
   active?: boolean;

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canvasHref,
   matchRoute,
+  newCanvasHref,
   projectHref,
   resolveLinkDecision,
 } from '../apps/web/src/app/router.js';
@@ -42,9 +44,16 @@ describe('matchRoute', () => {
     expect(matchRoute('/workbench/')).toEqual({ name: 'workbenchHome' });
   });
 
-  it('/workbench/:projectId 取出并解码项目 id', () => {
+  it('/workbench/:projectId 只保留旧链接兼容', () => {
     expect(matchRoute('/workbench/p-42')).toEqual({ name: 'workbench', projectId: 'p-42' });
     expect(matchRoute('/workbench/a%2Fb')).toEqual({ name: 'workbench', projectId: 'a/b' });
+  });
+
+  it('/canvas 分别读取 spaceId、projectId 与 newProject', () => {
+    expect(matchRoute('/canvas', '?spaceId=space-1&projectId=canvas-1')).toEqual({ name: 'canvas', workspaceId: 'space-1', projectId: 'canvas-1', newProject: false });
+    expect(matchRoute('/canvas', '?newProject=true&source=sidebar_create_new')).toEqual({ name: 'canvas', workspaceId: null, projectId: null, newProject: true });
+    expect(canvasHref('space/1', 'canvas 1')).toBe('/canvas?spaceId=space%2F1&projectId=canvas%201');
+    expect(newCanvasHref()).toBe('/canvas?newProject=true&source=sidebar_create_new&itemKey=create_new');
   });
 
   it('未知路径落到 404 页，而不是白屏或冒充落地页', () => {

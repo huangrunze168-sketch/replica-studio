@@ -104,6 +104,19 @@ export interface BackendVideoRequest {
  * 而单图生视频挂的是 `duration` 与 `ratio`。所以这里不给时长参数，
  * 给了反而会落到一个该模式不认识的字段上。
  */
+export interface BackendVideoGenerationRequest {
+  prompt: string;
+  model: string;
+  modeType: 'text2video' | 'singleImage2video' | 'frames2video' | 'image2video' | 'mixed2video' | 'videoEdit2video';
+  references: readonly { path: string; mediaType: string }[];
+  durationSeconds: number;
+  ratio?: string;
+  resolution?: string;
+  outputDir: string;
+  label: string;
+  settings?: BackendSettings;
+}
+
 export interface BackendVideoEditRequest {
   /** 原片段的**绝对**路径。 */
   videoFile: string;
@@ -215,6 +228,7 @@ export interface GenerationBackend {
   readonly capabilities: GenerationCapabilities;
   generateImage(request: BackendImageRequest): Promise<BackendMedia>;
   generateVideoFromImage(request: BackendVideoRequest): Promise<BackendMedia>;
+  generateVideo?(request: BackendVideoGenerationRequest): Promise<BackendMedia>;
   /**
    * 视频重拍。后端不支持时必须抛 `UnsupportedCapabilityError`，
    * 而不是返回一段没经过重拍的视频——那会让用户以为改动生效了。

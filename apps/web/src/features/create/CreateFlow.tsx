@@ -3,6 +3,8 @@ import { ports } from '../../app/useAppData';
 import { navigate } from '../../app/router';
 import type { AccountEntitlements } from '../../ports';
 import { canUseFreeRetake, evaluateFreeExport, freePlan } from '../../domain/entitlements';
+import '../../marketing.css';
+import './create.css';
 
 const steps: Array<[string, string, string]> = [
   ['01', '上传参考片', '输入一句话也能开始，系统先读懂参考。'],
@@ -42,6 +44,11 @@ export function CreateFlow() {
 
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tool = params.get('tool');
+    if (tool === 'retake' || tool === 'video') setActiveStep(2);
+    if (tool === 'upscale') setActiveStep(3);
+
     void (async () => {
       try {
         setAccount(await ports.account.get());
@@ -49,7 +56,6 @@ export function CreateFlow() {
         return;
       }
 
-      const params = new URLSearchParams(window.location.search);
       const payment = params.get('payment');
       const sessionId = params.get('session_id');
       if (payment === 'stripe' && sessionId) {

@@ -11,6 +11,7 @@
 | --- | --- |
 | / | 解释产品价值、展示前后对比、引导注册 |
 | /signup | 轻量注册引导，完成后进入 /create |
+| `/skill` | 小QTV Skill 商店：发现、收藏、从 GitHub 导入并交给 Agent 使用 |
 | `/create` | 四步轻量创作流程：上传参考 → 风格分析 → 分镜与低清生成 → 锁定与导出 |
 | `/workbench` | 项目列表与创建入口，登录后进入 |
 | `/workbench/:projectId` | 专业项目工作台，登录后进入 |
@@ -155,6 +156,8 @@ corepack pnpm cli video:generate --project-id <UUID> --revision N `
 - `GET /health`
 - `POST /api/v1/commands`
 - `POST /api/v1/kernel/check`
+- `GET /api/v1/skills` / `GET /api/v1/skills/:skillId`
+- `POST /api/v1/skills/imports/github/inspect` / `POST /api/v1/skills/imports/github`
 - `GET /api/v1/projects`
 - `GET /api/v1/projects/:projectId`
 - `GET /api/v1/projects/:projectId/events?after=0`

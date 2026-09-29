@@ -38,9 +38,6 @@ importers:
       '@qiyin/canvas-adapter':
         specifier: workspace:*
         version: link:../../packages/canvas-adapter
-      '@qiyin/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
       '@qiyin/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -56,6 +53,9 @@ importers:
 
   apps/local-api:
     dependencies:
+      '@qiyin/canvas-adapter':
+        specifier: workspace:*
+        version: link:../../packages/canvas-adapter
       '@qiyin/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -65,6 +65,15 @@ importers:
       '@qiyin/frontkernel-adapter':
         specifier: workspace:*
         version: link:../../packages/frontkernel-adapter
+      '@qiyin/generation-backend':
+        specifier: workspace:*
+        version: link:../../packages/generation-backend
+      '@qiyin/generation-backends':
+        specifier: workspace:*
+        version: link:../../packages/generation-backends
+      '@qiyin/generation-service':
+        specifier: workspace:*
+        version: link:../../packages/generation-service
       '@qiyin/kernel-service':
         specifier: workspace:*
         version: link:../../packages/kernel-service
@@ -79,9 +88,6 @@ importers:
       '@qiyin/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@qiyin/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
       '@vitejs/plugin-react':
         specifier: ^5.1.1
         version: 5.2.0(vite@7.3.6(@types/node@24.13.6)(jiti@2.7.0)(tsx@4.23.13))
@@ -147,9 +153,6 @@ importers:
 
   packages/generation-service:
     dependencies:
-      '@qiyin/canvas-adapter':
-        specifier: workspace:*
-        version: link:../canvas-adapter
       '@qiyin/domain':
         specifier: workspace:*
         version: link:../domain

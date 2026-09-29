@@ -1,10 +1,16 @@
-import type { AccountEntitlements, AppPorts, AgentMessage, Asset, GenerationJob, ProjectPort, ProjectSummary, ReferenceSource, Shot, SourceFinding } from '../../ports/index.js';
+import type { AccountEntitlements, AppPorts, AgentMessage, Asset, GenerationJob, PersistedCanvasDocument, TimelineDocument, ProjectPort, ProjectSummary, ReferenceSource, Shot, SourceFinding, WorkspaceDetail, WorkspaceSummary } from '../../ports/index.js';
 
 const projects: ProjectSummary[] = [
-  { id: 'p-demo', name: '雨夜追踪 · Demo', description: '一支 60 秒城市悬疑短片', updatedAt: '刚刚', status: 'active', shots: 12, assets: 28, progress: 68, revision: 4, state: 'PRODUCTION', maxBudgetCents: 2000, rightsConfirmed: true },
-  { id: 'p-brand', name: '品牌片 2026', description: '产品视觉与社媒切片', updatedAt: '昨天', status: 'active', shots: 8, assets: 16, progress: 34, revision: 2, state: 'PRODUCTION', maxBudgetCents: 1200, rightsConfirmed: true },
-  { id: 'p-archive', name: '山海志先导片', description: '已归档的概念验证项目', updatedAt: '2026-08-18', status: 'archived', shots: 24, assets: 53, progress: 100, revision: 12, state: 'ARCHIVED', maxBudgetCents: 3000, rightsConfirmed: true },
+  { id: 'p-demo', workspaceId: 'w-demo', name: '画布 1', description: '一支 60 秒城市悬疑短片', updatedAt: '刚刚', status: 'active', shots: 12, assets: 28, progress: 68, revision: 4, state: 'PRODUCTION', maxBudgetCents: 2000, rightsConfirmed: true },
+  { id: 'p-brand', workspaceId: 'w-brand', name: '画布 1', description: '产品视觉与社媒切片', updatedAt: '昨天', status: 'active', shots: 8, assets: 16, progress: 34, revision: 2, state: 'PRODUCTION', maxBudgetCents: 1200, rightsConfirmed: true },
+  { id: 'p-archive', workspaceId: 'w-archive', name: '画布 1', description: '已归档的概念验证项目', updatedAt: '2026-08-18', status: 'archived', shots: 24, assets: 53, progress: 100, revision: 12, state: 'ARCHIVED', maxBudgetCents: 3000, rightsConfirmed: true },
 ];
+const workspaces: WorkspaceSummary[] = [
+  { id: 'w-demo', name: '雨夜追踪 · Demo', description: '一支 60 秒城市悬疑短片', updatedAt: '刚刚', status: 'active', revision: 4, canvasCount: 1, primaryProjectId: 'p-demo', shots: 12, assets: 28, progress: 68, state: 'PRODUCTION', maxBudgetCents: 2000, rightsConfirmed: true },
+  { id: 'w-brand', name: '品牌片 2026', description: '产品视觉与社媒切片', updatedAt: '昨天', status: 'active', revision: 2, canvasCount: 1, primaryProjectId: 'p-brand', shots: 8, assets: 16, progress: 34, state: 'PRODUCTION', maxBudgetCents: 1200, rightsConfirmed: true },
+  { id: 'w-archive', name: '山海志先导片', description: '已归档的概念验证项目', updatedAt: '2026-08-18', status: 'archived', revision: 12, canvasCount: 1, primaryProjectId: 'p-archive', shots: 24, assets: 53, progress: 100, state: 'ARCHIVED', maxBudgetCents: 3000, rightsConfirmed: true },
+];
+const workspaceDetail = (workspace: WorkspaceSummary): WorkspaceDetail => ({ ...workspace, canvases: projects.filter(project => project.workspaceId === workspace.id) });
 const shots: Shot[] = [
   { id: 's1', title: '01 · 霓虹下的脚步', scene: '外景 / 雨夜街道', status: 'approved', duration: '00:05', prompt: '湿润柏油路上的霓虹倒影，手持跟拍，35mm' },
   { id: 's2', title: '02 · 橱窗倒影', scene: '外景 / 商业街', status: 'ready', duration: '00:04', prompt: '人物掠过橱窗，倒影中出现第二个身影' },
@@ -78,22 +84,45 @@ const sources: ReferenceSource[] = [
 ];
 let accountState: AccountEntitlements = { accountId: 'demo-account', plan: 'free', quotaCredits: 3, watermark: true, subscriptionExpiresAt: null, entitlements: { max_duration_seconds: 15, preview_quality: '低清预览', watermark: true, local_retakes: 1, requires_payment_confirmation: true } };
 const messages: AgentMessage[] = [{ id: 'm1', role: 'agent', content: '你好，我是项目 Agent。可以帮你检查镜头连续性、整理素材，或发起生成任务。', createdAt: '刚刚' }];
+const canvasDocuments = new Map<string, { document: PersistedCanvasDocument; revision: number }>();
+const timelineDocuments = new Map<string, { document: TimelineDocument; revision: number }>();
 const delay = <T,>(value: T) => new Promise<T>(resolve => setTimeout(() => resolve(value), 100));
 export const memoryAdapter: AppPorts = {
   account: {
     get: () => delay(accountState),
-    consume: (credits, reason) => { accountState = { ...accountState, quotaCredits: Math.max(0, accountState.quotaCredits - credits) }; return delay(accountState); },
+    consume: (credits, _reason) => { accountState = { ...accountState, quotaCredits: Math.max(0, accountState.quotaCredits - credits) }; return delay(accountState); },
     confirmPayment: (plan) => { accountState = { ...accountState, plan, quotaCredits: accountState.quotaCredits + (plan === 'pro' ? 100 : 30), watermark: false, subscriptionExpiresAt: new Date(Date.now() + 30 * 86400000).toISOString() }; return delay(accountState); },
     startCheckout: async (plan, _amountCents, returnUrl) => { await memoryAdapter.account.confirmPayment(plan, _amountCents); return { provider: 'local', sessionId: 'local-checkout', url: returnUrl }; },
     confirmStripePayment: async () => memoryAdapter.account.confirmPayment('studio', 9900),
   },
-  projects: {
-    list: () => delay(projects.filter(project => project.status === 'active')),
+  workspaces: {
+    list: () => delay(workspaces.filter(workspace => workspace.status === 'active')),
+    listArchived: () => delay(workspaces.filter(workspace => workspace.status === 'archived')),
+    get: id => { const workspace = workspaces.find(item => item.id === id); return delay(workspace ? workspaceDetail(workspace) : undefined); },
+    create: (name = '未命名工作区') => {
+      const stamp = Date.now();
+      const workspace: WorkspaceSummary = { id: `w-${stamp}`, name, description: '新工作区 · 1 张画布', updatedAt: '刚刚', status: 'active', revision: 1, canvasCount: 1, primaryProjectId: `p-${stamp}`, shots: 0, assets: 0, progress: 0, state: 'EMPTY', maxBudgetCents: 0, rightsConfirmed: false };
+      const project: ProjectSummary = { id: `p-${stamp}`, workspaceId: workspace.id, name: '画布 1', description: '', updatedAt: '刚刚', status: 'active', shots: 0, assets: 0, progress: 0, revision: 1, state: 'EMPTY', maxBudgetCents: 0, rightsConfirmed: false };
+      workspaces.unshift(workspace); projects.unshift(project);
+      return delay({ workspace: workspaceDetail(workspace), project });
+    },
+    rename: (id, name) => { const workspace = workspaces.find(item => item.id === id); if (!workspace) throw new Error('工作区不存在'); workspace.name = name.trim(); workspace.updatedAt = '刚刚'; workspace.revision += 1; return delay(workspaceDetail(workspace)); },
+    trash: id => { const workspace = workspaces.find(item => item.id === id); if (!workspace) throw new Error('工作区不存在'); workspace.status = 'archived'; workspace.updatedAt = '刚刚'; workspace.revision += 1; projects.filter(project => project.workspaceId === id).forEach(project => { project.status = 'archived'; }); return delay(workspaceDetail(workspace)); },
+    restore: id => { const workspace = workspaces.find(item => item.id === id); if (!workspace) throw new Error('工作区不存在'); workspace.status = 'active'; workspace.updatedAt = '刚刚'; workspace.revision += 1; projects.filter(project => project.workspaceId === id).forEach(project => { project.status = 'active'; }); return delay(workspaceDetail(workspace)); },
+    purge: id => { const wi = workspaces.findIndex(item => item.id === id); if (wi >= 0) workspaces.splice(wi, 1); for (let i = projects.length - 1; i >= 0; i -= 1) if (projects[i]?.workspaceId === id) projects.splice(i, 1); return delay(undefined); },
+  },
+  canvases: {
+    list: workspaceId => delay(projects.filter(project => project.status === 'active' && (!workspaceId || project.workspaceId === workspaceId))),
     listArchived: () => delay(projects.filter(project => project.status === 'archived')),
     get: id => delay(projects.find(project => project.id === id)),
     create: input => {
-      const project: ProjectSummary = { name: input.name, description: input.description, id: `p-${Date.now()}`, updatedAt: '刚刚', status: 'active', shots: 0, assets: 0, progress: 0, revision: 1, state: 'EMPTY', maxBudgetCents: input.maxBudgetCents ?? 0, rightsConfirmed: input.rightsConfirmed ?? false };
-      projects.unshift(project);
+      const stamp = Date.now();
+      const workspaceId = input.workspaceId ?? `w-${stamp}`;
+      const project: ProjectSummary = { name: input.name, description: input.description, workspaceId, id: `p-${stamp}`, updatedAt: '刚刚', status: 'active', shots: 0, assets: 0, progress: 0, revision: 1, state: 'EMPTY', maxBudgetCents: input.maxBudgetCents ?? 0, rightsConfirmed: input.rightsConfirmed ?? false };
+      projects.push(project);
+      const workspace = workspaces.find(item => item.id === workspaceId);
+      if (workspace) { workspace.canvasCount += 1; workspace.updatedAt = '刚刚'; workspace.revision += 1; }
+      else workspaces.unshift({ id: workspaceId, name: input.workspaceName ?? input.name, description: '新工作区 · 1 张画布', updatedAt: '刚刚', status: 'active', revision: 1, canvasCount: 1, primaryProjectId: project.id, shots: 0, assets: 0, progress: 0, state: 'EMPTY', maxBudgetCents: 0, rightsConfirmed: false });
       return delay(project);
     },
     rename: (id, name) => {
@@ -142,8 +171,31 @@ export const memoryAdapter: AppPorts = {
       return delay(project);
     },
   } satisfies ProjectPort,
+  canvasDocuments: {
+    load: projectId => {
+      const stored = canvasDocuments.get(projectId);
+      const projectRevision = projects.find(project => project.id === projectId)?.revision ?? 1;
+      return delay({ document: stored?.document ?? null, projectRevision, documentRevision: stored?.revision ?? null });
+    },
+    save: (projectId, expectedProjectRevision, document) => {
+      const project = projects.find(item => item.id === projectId);
+      if (!project) throw new Error('项目不存在');
+      if (project.revision !== expectedProjectRevision) throw new Error('画布已在其他位置更新，请重新载入。');
+      project.revision += 1;
+      canvasDocuments.set(projectId, { document: structuredClone(document), revision: project.revision });
+      return delay({ projectRevision: project.revision, documentRevision: project.revision });
+    },
+  },
+  timeline: {
+    load: projectId => { const stored = timelineDocuments.get(projectId); const projectRevision = projects.find(project => project.id === projectId)?.revision ?? 1; return delay({ document: stored?.document ?? null, projectRevision, documentRevision: stored?.revision ?? null }); },
+    save: (projectId, expectedProjectRevision, document) => { const project = projects.find(item => item.id === projectId); if (!project) throw new Error('项目不存在'); if (project.revision !== expectedProjectRevision) throw new Error('时间线已在其他位置更新，请重新载入。'); project.revision += 1; timelineDocuments.set(projectId, { document: structuredClone(document), revision: project.revision }); return delay({ projectRevision: project.revision, documentRevision: project.revision }); },
+    startExport: () => Promise.reject(new Error('本地 API 未连接，无法执行真实 MP4 导出。')),
+    exportStatus: () => Promise.reject(new Error('本地 API 未连接，无法读取真实导出状态。')),
+    cancelExport: () => Promise.reject(new Error('本地 API 未连接，无法取消真实导出。')),
+  },
+  models: { search: () => delay([]), schema: () => Promise.reject(new Error('本地模型目录不可用，请连接 Local API。')) },
   shots: { list: () => delay(shots) },
-  media: { listAssets: () => delay(assets) },
+  media: { listAssets: () => delay(assets), upload: () => Promise.reject(new Error('本地 API 未连接，无法上传真实素材。')), rate: async (_projectId, artifactId, stars) => { const asset = assets.find(item => item.id === artifactId); if (asset) { if (stars) asset.rating = stars; else delete asset.rating; } }, remove: async (_projectId, artifactId) => { const index = assets.findIndex(item => item.id === artifactId); if (index >= 0) assets.splice(index, 1); } },
   source: {
     list: () => delay(sources),
     create: (_projectId, name, genre) => {
@@ -152,6 +204,6 @@ export const memoryAdapter: AppPorts = {
       return delay(source);
     },
   },
-  generation: { listJobs: () => delay(jobs), create: (_projectId, title, type) => { const job = { id: `j-${Date.now()}`, title, type, status: 'queued' as const, progress: 0, createdAt: '刚刚' }; jobs = [job, ...jobs]; return delay(job); } },
-  agent: { listMessages: () => delay(messages), send: (_projectId, content) => { const message = { id: `m-${Date.now()}`, role: 'user' as const, content, createdAt: '刚刚' }; messages.push(message); return delay(message); } },
+  generation: { listJobs: () => delay(jobs), create: (_projectId, title, type) => { const job = { id: `j-${Date.now()}`, title, type, status: 'queued' as const, progress: 0, createdAt: '刚刚' }; jobs = [job, ...jobs]; return delay(job); }, status: () => Promise.reject(new Error('本地 API 未连接，无法核查真实生成任务。')) },
+  agent: { listConversations: () => delay([]), createConversation: () => delay(`demo-${Date.now()}`), listMessages: () => delay(messages), send: (_projectId, content) => { const message = { id: `m-${Date.now()}`, role: 'user' as const, content, createdAt: '刚刚' }; messages.push(message); return delay(message); }, cancel: () => Promise.reject(new Error('本地 API 未连接，无法取消真实 Agent。')) },
 };

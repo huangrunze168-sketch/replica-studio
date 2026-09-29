@@ -4,6 +4,7 @@ import type {
   BackendImageRequest,
   BackendMedia,
   BackendVideoEditRequest,
+  BackendVideoGenerationRequest,
   BackendVideoRequest,
   GenerationBackend,
 } from '@qiyin/generation-backend';
@@ -90,7 +91,7 @@ export function createCanvasBackend(adapter: CanvasAdapter): GenerationBackend {
 
   return {
     id: 'canvas',
-    label: 'Canvas',
+    label: 'LibTV 画布（外部服务）',
     /*
       小QTV 的模型 schema 里确实有 `videoEdit2video`（片段重拍）与
       tool_spec 里读出来的，不是猜的。所以 videoEdit 如实声明为 true。
@@ -177,6 +178,14 @@ export function createCanvasBackend(adapter: CanvasAdapter): GenerationBackend {
         cost: null,
         notes: [...notesOf(normalized), ...referenceNotes],
       };
+    },
+
+    async generateVideo(request: BackendVideoGenerationRequest): Promise<BackendMedia> {
+      const marker = stamp(); const videoNode = `${request.label}-video-${marker}`; const normalized = await settingsFor(request.model, request.settings); const referenceNodes: string[] = [];
+      for (const [index, reference] of request.references.entries()) { const type = reference.mediaType.startsWith('video/') ? 'video' : reference.mediaType.startsWith('audio/') ? 'audio' : 'image'; const name = `${request.label}-${type}-${index + 1}-${marker}`; await adapter.upload({ name, file: reference.path, type }); referenceNodes.push(name); }
+      await adapter.nodeCreate({ name: videoNode, type: 'video', prompt: request.prompt, sets: { ...normalized.accepted, model: request.model, modeType: request.modeType, duration: Math.max(1, Math.round(request.durationSeconds)), ...(request.resolution ? { resolution: request.resolution } : {}), ratio: request.ratio ?? (request.references.some(item => item.mediaType.startsWith('image/')) ? 'adaptive' : '16:9') }, ...(referenceNodes.length ? { left: referenceNodes } : {}) });
+      const run = await adapter.nodeRun(videoNode); const { savedPaths } = await downloadTo(videoNode, request.outputDir); if (!savedPaths.length) throw new Error(`LibTV 报生成成功，但节点 ${videoNode} 没有落盘任何文件`);
+      return { files: savedPaths, source_url: run.data?.url?.[0] ?? null, task_ref: videoNode, cost: null, notes: notesOf(normalized) };
     },
 
     async generateVideoFromImage(request: BackendVideoRequest): Promise<BackendMedia> {

@@ -60,6 +60,18 @@ describe('绑定文件读取', () => {
     expect(readCanvasBinding(dir)).toEqual({ canvasUuid: 'u-1', workspaceId: 9139670, dir });
   });
 
+  it('使用 LibTV CLI 1.1.3 的官方 .libtv/project.json 路径', () => {
+    expect(canvasBindingPath('C:\\project')).toBe(join('C:\\project', '.libtv', 'project.json'));
+  });
+
+  it('兼容读取早期开发版留下的 .canvas/project.json', () => {
+    const dir = tempDir();
+    const legacy = join(dir, '.canvas', 'project.json');
+    mkdirSync(dirname(legacy), { recursive: true });
+    writeFileSync(legacy, JSON.stringify({ projectUuid: 'legacy-u', workspaceId: 7 }), 'utf8');
+    expect(readCanvasBinding(dir)).toEqual({ canvasUuid: 'legacy-u', workspaceId: 7, dir });
+  });
+
   it('坏掉的 JSON 或缺 projectUuid 都算「没绑」，而不是抛错让整个面板打不开', () => {
     const broken = tempDir();
     mkdirSync(dirname(canvasBindingPath(broken)), { recursive: true });

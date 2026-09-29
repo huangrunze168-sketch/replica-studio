@@ -8,7 +8,6 @@ import {
   VIDEO_HD_MAX_SOURCE_BYTES,
   VIDEO_HD_MAX_SOURCE_LONG_SIDE,
   VIDEO_HD_SCALES,
-  videoHdNodeName,
   videoHdTierList,
 } from '@qiyin/contracts';
 import {

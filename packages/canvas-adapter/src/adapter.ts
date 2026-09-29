@@ -10,7 +10,6 @@ import type {
   CanvasImageShortcutList,
   CanvasModality,
   CanvasNodeResult,
-  CanvasProject,
   CanvasWorkspace,
 } from './protocol.js';
 import type { CanvasRunner } from './runner.js';

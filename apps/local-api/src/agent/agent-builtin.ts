@@ -31,10 +31,7 @@ import {
 } from './agent-tool-copy.js';
 
 /** 一轮最多几步（防打转：模型反复调工具时总得有个头） */
-export const BUILTIN_MAX_STEPS = 12;
-/** 单次模型调用的超时（毫秒） */
-export const BUILTIN_CALL_TIMEOUT_MS = 180_000;
-
+const BUILTIN_MAX_STEPS = 12;
 export interface BuiltinConfig {
   /** OpenAI 兼容端点，例如 https://api.deepseek.com/v1 */
   baseUrl: string;
@@ -382,7 +379,7 @@ export const BUILTIN_TOOLS = [
 
 /* ---------- 运行 ---------- */
 
-export interface BuiltinToolResult {
+interface BuiltinToolResult {
   ok: boolean;
   /** 给模型看的正文（原样转述，不要美化） */
   content: string;
@@ -412,6 +409,14 @@ export interface BuiltinToolResult {
 
 export interface StartBuiltinRunOptions {
   config: BuiltinConfig;
+  /** 创意规划只能读写对话：请求中不声明任何可执行工具。其余既有调用保持默认工具能力。 */
+  exposeTools?: boolean;
+  /** 规划端点只需正文；兼容不识别 stream_options 的第三方服务。 */
+  includeUsage?: boolean;
+  /** 限制单次规划输出，避免异常回复无限消耗输出额度。 */
+  maxOutputTokens?: number;
+  /** 单轮总耗时上限；仅显式配置的只读规划路径启用，避免改变现有生成工具的长任务语义。 */
+  maxDurationMs?: number;
   /** 系统提示（项目简报 + 这一轮的模式/生成模式） */
   system: string;
   prompt: string;
@@ -463,6 +468,12 @@ interface ChatMessage {
 export function startBuiltinRun(options: StartBuiltinRunOptions): BuiltinRunHandle {
   const controller = new AbortController();
   let cancelled = false;
+  let timedOut = false;
+  const timeout = options.maxDurationMs === undefined ? null : setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.maxDurationMs);
+  timeout?.unref();
 
   const done = (async () => {
     const messages: ChatMessage[] = [
@@ -487,17 +498,20 @@ export function startBuiltinRun(options: StartBuiltinRunOptions): BuiltinRunHand
           },
           body: JSON.stringify({
             model: options.config.model,
+            ...(options.maxOutputTokens === undefined ? {} : { max_tokens: options.maxOutputTokens }),
             stream: true,
-            stream_options: { include_usage: true },
+            ...(options.includeUsage === false ? {} : { stream_options: { include_usage: true } }),
             messages,
-            tools: BUILTIN_TOOLS,
+            ...(options.exposeTools === false ? {} : { tools: BUILTIN_TOOLS }),
           }),
         });
         if (!response.ok || response.body === null) {
-          const body = await response.text().catch(() => '');
+          const body = options.exposeTools === false ? '' : await response.text().catch(() => '');
           options.onEvent({
             kind: 'error',
-            text: `模型接口返回 ${response.status}：${body.slice(0, 300) || '（没有正文）'}`,
+            text: options.exposeTools === false
+              ? `第三方规划接口返回 ${response.status}；原始错误正文可能包含凭据，已隐藏。请在服务商侧核对模型、密钥和额度。`
+              : `模型接口返回 ${response.status}：${body.slice(0, 300) || '（没有正文）'}`,
           });
           options.onEvent({ kind: 'done', text: '本轮结束' });
           return;
@@ -531,7 +545,17 @@ export function startBuiltinRun(options: StartBuiltinRunOptions): BuiltinRunHand
         }
 
         const assembled = assembleToolCalls(calls);
+        if (options.exposeTools === false && assembled.length > 0) {
+          options.onEvent({ kind: 'error', text: '规划模型返回了未授权的工具调用，本轮已停止，未执行工具。' });
+          options.onEvent({ kind: 'done', text: '本轮结束' });
+          return;
+        }
         if (assembled.length === 0) {
+          if (options.exposeTools === false && finish !== 'stop') {
+            options.onEvent({ kind: 'error', text: `规划响应没有正常结束（finish_reason=${finish ?? '缺失'}），不能把残缺文本当作完整方案。` });
+            options.onEvent({ kind: 'done', text: '本轮结束' });
+            return;
+          }
           options.onEvent({ kind: 'done', text: '本轮结束', ...(usage === undefined ? {} : { usage }) });
           return;
         }
@@ -615,8 +639,15 @@ export function startBuiltinRun(options: StartBuiltinRunOptions): BuiltinRunHand
         options.onEvent({ kind: 'done', text: '已中止' });
         return;
       }
+      if (timedOut) {
+        options.onEvent({ kind: 'error', text: '第三方规划请求已超时并中止；结果和计费状态未获核实，请先查看服务商记录，不要盲目重复请求。' });
+        options.onEvent({ kind: 'done', text: '本轮结束' });
+        return;
+      }
       options.onEvent({ kind: 'error', text: `内置 Agent 出错：${(error as Error).message}` });
       options.onEvent({ kind: 'done', text: '本轮结束' });
+    } finally {
+      if (timeout !== null) clearTimeout(timeout);
     }
   })();
 

@@ -47,7 +47,7 @@ export function createProcessCanvasRunner(options: ProcessCanvasRunnerOptions): 
           if (settled) return;
           settled = true;
           child.kill('SIGKILL');
-          reject(new Error(`canvas ${request.args.join(' ')} 超时（${timeoutMs}ms）`));
+          reject(new Error(`LibTV CLI 调用超时（${timeoutMs}ms）；任务结果与费用未知，请核对目标画布和账户记录后再决定是否重试。`));
         }, timeoutMs);
 
         child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
