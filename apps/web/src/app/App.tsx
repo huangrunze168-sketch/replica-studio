@@ -2,10 +2,10 @@ import { lazy, Suspense, useEffect } from 'react';
 import { hasSession } from '../features/auth/session';
 import { navigate, useRoute } from './router';
 
-const LandingPage = lazy(() => import('../features/marketing/LandingPage').then(module => ({ default: module.LandingPage })));
+const LandingPage = lazy(() => import('../features/create/CreateFlowDemo').then(module => ({ default: module.CreateFlowDemo })));
 const NotFoundPage = lazy(() => import('../features/marketing/NotFoundPage').then(module => ({ default: module.NotFoundPage })));
 const SignupPage = lazy(() => import('../features/marketing/SignupPage').then(module => ({ default: module.SignupPage })));
-const CreateFlow = lazy(() => import('../features/create/CreateFlow').then(module => ({ default: module.CreateFlow })));
+const CreateFlow = lazy(() => import('../features/create/CreateFlowDemo').then(module => ({ default: module.CreateFlowDemo })));
 const SkillPage = lazy(() => import('../features/skills/SkillPage').then(module => ({ default: module.SkillPage })));
 const ProjectListPage = lazy(() => import('../features/workbench/ProjectListPage').then(module => ({ default: module.ProjectListPage })));
 const CanvasRoute = lazy(() => import('./WorkbenchRoutes').then(module => ({ default: module.CanvasRoute })));

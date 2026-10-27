@@ -54,6 +54,7 @@ export function matchRoute(pathname: string, search = ''): Route {
   if (cacheKey === cachedPath) return cachedRoute;
 
   const segments = pathname.split('/').filter(Boolean);
+  if (segments[0] === 'yingliu-demo') segments.shift();
   let next: Route;
 
   if (segments.length === 0) {

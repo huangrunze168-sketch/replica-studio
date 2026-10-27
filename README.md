@@ -1,3 +1,62 @@
+# 映流 MV · AI 音乐视频工作流
+
+一个可运行的 Web Demo：用户创建项目并上传歌曲、歌词、人物参考图和可选参考视频；DeepSeek Agent 分析物料，结合 ZY 导演库生成逐镜全能提示词；用户确认后，通过 ModelsNexus 调用 Seedance 或 MiniMax，最后在线播放或下载成片。
+
+线上 Demo：<http://43.134.68.104/yingliu-demo/>
+
+## 当前工作流
+
+1. 项目与物料：创建真实项目，上传歌曲、歌词、多张人物参考图，以及可选参考视频和参考音色。
+2. Agent 分析与生成确认：DeepSeek 读取需求与物料，应用所选导演的方法，输出含歌词时间轴、人物一致性、场景动作、景别、摄影运镜、负面提示词和镜头衔接的逐镜提示词。
+3. 成片合成与交付：人工确认模型与清晰度后提交生成；Seedance 直接使用模型结果，MiniMax 超过 15 秒时由服务器 FFmpeg 分段合成；完成后支持在线播放和 MP4 下载。
+
+## 本地运行
+
+要求：Node.js 22.15+、Corepack、pnpm 10.33+、Python 3.11+、FFmpeg/ffprobe。
+
+```powershell
+git clone https://github.com/huangrunze168-sketch/yingliu-mv-demo.git
+cd yingliu-mv-demo
+corepack enable
+corepack pnpm install
+
+# 终端 1：启动 API
+$env:YINGLIU_DEMO_DATA="$PWD/.data/yingliu-demo/jobs"
+$env:YINGLIU_DEMO_PROJECTS_FILE="$PWD/.data/yingliu-demo/projects.json"
+python apps/demo-api/server.py
+
+# 终端 2：启动前端
+corepack pnpm --filter @qiyin/web dev
+```
+
+打开 <http://127.0.0.1:5173/yingliu-demo/>。前端开发服务器需要把 `/yingliu-demo-api/` 代理到 `127.0.0.1:8791`；仓库中的 Vite 配置已包含该代理。
+
+只看 UI 时无需配置第三方密钥；真实 Agent/视频生成需要参考 [`apps/demo-api/.env.example`](apps/demo-api/.env.example) 配置服务端环境变量。密钥只能放在服务端，不能写入前端或提交到 Git。
+
+## 校验与构建
+
+```powershell
+corepack pnpm --filter @qiyin/web check
+corepack pnpm --filter @qiyin/web build
+```
+
+静态产物位于 `apps/web/dist/`。Linux + Nginx + systemd 的参考配置位于：
+
+- [`apps/demo-api/xiaoyou.conf`](apps/demo-api/xiaoyou.conf)
+- [`apps/demo-api/yingliu-demo-api.service`](apps/demo-api/yingliu-demo-api.service)
+- [`apps/demo-api/README.md`](apps/demo-api/README.md)
+
+## 安全与版权
+
+- 项目、上传素材和任务状态由服务端保存；生产环境请自行增加认证、访问控制和备份。
+- `/jobs` 使用 `client_request_id` 实现幂等提交，避免重复创建上游任务。
+- 上传素材会按用户确认发送给 ModelsNexus；短时签名链接默认两小时过期。
+- 工作台交互层包含基于 Velorn 的 GPL-3.0 移植，来源与许可证见 [`apps/web/public/third-party/velorn/NOTICE.md`](apps/web/public/third-party/velorn/NOTICE.md)。
+
+---
+
+## 原始 Replica Studio 工程说明
+
 # 小QTV
 
 > 网页端工程名为 `@qiyin/web`；数据目录仍是 `%APPDATA%\qiyin-replica-studio`（旧名「期音复刻流水线」，改名不动数据）。

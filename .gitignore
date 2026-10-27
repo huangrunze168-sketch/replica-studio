@@ -2,6 +2,11 @@ node_modules/
 dist/
 dist-electron/
 release/
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
 # 打包产物目录是 `release-0.2.0/` 这种**带版本号**的形态，
 # 上面那条 `release/` 匹配不到它们——实测这几个目录加起来约 3 GB。
 # 它们不是代码，是构建出来的安装包：不该进库。
@@ -63,6 +68,14 @@ third-party/github-evidence/background-removal-js/bundle/models/
 docs/
 third-party/
 vendor/
+# OpenCut MIT 工作台壳是前端编译源码，不属于本地第三方检出目录。
+!apps/web/src/vendor/
+!apps/web/src/vendor/opencut/
+!apps/web/src/vendor/opencut/**
+# Velorn GPL-3.0 移植层随公开 Web Demo 分发许可证与来源说明。
+!apps/web/public/third-party/
+!apps/web/public/third-party/velorn/
+!apps/web/public/third-party/velorn/**
 PROJECT.md
 
 # 已移出索引的第三方抓取页（本地保留）
